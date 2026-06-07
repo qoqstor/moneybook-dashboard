@@ -1,0 +1,507 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>[DEV] 個人財務儀表板</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#07071a;--card:#0d0d1f;--border:#1e1e38;--accent:#6366f1;--accent2:#06b6d4;--text:#e2e8f0;--muted:#475569;--dim:#1e293b}
+    body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;min-height:100vh;background-image:radial-gradient(ellipse 80% 40% at 50% 0%,#1e1b4b44,transparent)}
+    .grid-bg{position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(rgba(99,102,241,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(99,102,241,.03) 1px,transparent 1px);background-size:48px 48px}
+    .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:32px 16px 80px}
+    /* Auth */
+    #auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;gap:20px}
+    #auth-screen h1{font-size:28px;font-weight:900;letter-spacing:-1px}
+    #auth-screen p{color:var(--muted);font-size:14px;max-width:360px;line-height:1.7}
+    .btn-auth{display:flex;align-items:center;gap:12px;background:#fff;color:#1a1a1a;border:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;box-shadow:0 4px 20px #0008;transition:transform .15s}
+    .btn-auth:hover{transform:translateY(-2px)}
+    .btn-auth img{width:22px}
+    /* Loading */
+    #loading-screen{display:none;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}
+    .spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .load-step{color:var(--muted);font-size:13px;font-family:'Space Mono',monospace}
+    .load-steps{display:flex;flex-direction:column;gap:6px;margin-top:8px;align-items:flex-start}
+    .load-step.done{color:#34d399}
+    .load-step.active{color:var(--accent2)}
+    /* Dashboard */
+    #dashboard{display:none}
+    header{text-align:center;margin-bottom:32px}
+    header .label{font-size:10px;letter-spacing:5px;color:var(--accent);text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:8px}
+    header h1{font-size:26px;font-weight:900;letter-spacing:-1px}
+    header .meta{color:var(--muted);font-size:12px;margin-top:8px}
+    .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+    .stat-card{background:var(--card);border-radius:14px;padding:18px 16px;border-top:2px solid transparent}
+    .stat-card .slabel{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:8px}
+    .stat-card .sval{font-size:20px;font-weight:900;font-family:'Space Mono',monospace}
+    .stat-card .ssub{font-size:11px;color:var(--muted);margin-top:4px}
+    .tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+    .tab-btn{padding:8px 18px;border-radius:8px;border:none;cursor:pointer;background:#111128;color:var(--muted);font-size:13px;font-family:'Noto Sans TC',sans-serif;transition:all .2s}
+    .tab-btn.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-weight:700;box-shadow:0 4px 16px #4f46e540}
+    .tab-panel{display:none}
+    .tab-panel.active{display:flex;flex-direction:column;gap:20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px 20px}
+    .card-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:20px}
+    .bar-row{margin-bottom:12px}
+    .bar-row-label{display:flex;justify-content:space-between;margin-bottom:5px}
+    .bar-row-label span:first-child{color:#94a3b8;font-size:13px}
+    .bar-row-label span:last-child{color:var(--text);font-size:12px;font-family:'Space Mono',monospace}
+    .bar-track{height:6px;background:var(--dim);border-radius:3px}
+    .bar-fill{height:100%;border-radius:3px;transition:width 1s cubic-bezier(.4,0,.2,1)}
+    /* Heatmap */
+    .heatmap-cell{height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:'Space Mono',monospace;cursor:default}
+    /* Portfolio */
+    .stock-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:12px}
+    .stock-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+    .stock-name{font-size:18px;font-weight:900;color:var(--text)}
+    .stock-code{font-size:12px;color:var(--muted);font-family:'Space Mono',monospace;margin-top:2px}
+    .stock-price{text-align:right}
+    .stock-price .price{font-size:26px;font-weight:900;font-family:'Space Mono',monospace}
+    .stock-price .chg{font-size:13px;font-weight:700;margin-top:2px}
+    .up{color:#f87171}
+    .down{color:#34d399}
+    .flat{color:#94a3b8}
+    .signals{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    .signal-tag{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;font-family:'Space Mono',monospace}
+    .signal-warn{background:#f9731620;color:#fb923c;border:1px solid #f9731640}
+    .signal-good{background:#34d39920;color:#34d399;border:1px solid #34d39940}
+    .signal-neu{background:#6366f120;color:#818cf8;border:1px solid #6366f140}
+    .event-badge{display:inline-flex;align-items:center;gap:6px;background:#fbbf2420;border:1px solid #fbbf2440;color:#fbbf24;border-radius:8px;padding:6px 12px;font-size:12px;margin-top:10px}
+    .market-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+    .mbar-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;text-align:center}
+    .mbar-label{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:6px}
+    .mbar-val{font-size:20px;font-weight:900;font-family:'Space Mono',monospace}
+    .insight{background:linear-gradient(135deg,#0d0d1f,#12102a);border:1px solid #312e81;border-radius:16px;padding:20px 24px}
+    .insight-title{color:#818cf8;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:14px}
+    .insight-row{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start}
+    .insight-row p{color:#94a3b8;font-size:13px;line-height:1.7}
+    .insight-row strong{color:#e2e8f0}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .chart-wrap{position:relative;height:220px}
+    .user-badge{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px}
+    .user-badge img{width:24px;border-radius:50%}
+    .user-badge span{color:var(--muted);font-size:12px}
+    .sign-out-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Noto Sans TC',sans-serif}
+    .sign-out-btn:hover{color:#f87171;border-color:#f87171}
+    .month-btn{padding:5px 14px;border-radius:6px;border:none;cursor:pointer;background:#111128;color:var(--muted);font-size:12px;font-family:'Space Mono',monospace;transition:all .2s}
+    .month-btn.active{background:#1e3a5f;color:#7dd3fc;border-bottom:2px solid #3b82f6}
+    .month-sel{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .hm-label{color:var(--muted);font-size:12px;font-family:'Space Mono',monospace;display:flex;align-items:center}
+    .hm-header{color:var(--muted);font-size:11px;text-align:center;font-family:'Space Mono',monospace}
+    footer{text-align:center;margin-top:40px;color:#1e293b;font-size:11px;font-family:'Space Mono',monospace}
+    .no-portfolio{color:var(--muted);font-size:14px;text-align:center;padding:40px 0}
+    @media(max-width:600px){.stat-grid{grid-template-columns:1fr 1fr}.two-col{grid-template-columns:1fr}.market-bar{grid-template-columns:1fr}}
+  </style>
+</head>
+<body>
+<div id="dev-banner" style="
+  position:fixed;top:0;left:0;right:0;z-index:9999;
+  background:linear-gradient(90deg,#b45309,#d97706);
+  color:#fff;font-family:'Space Mono',monospace;
+  font-size:12px;padding:6px 16px;
+  display:flex;justify-content:space-between;align-items:center;
+  box-shadow:0 2px 12px #0008;
+">
+  <span>⚠️ DEV 測試版 · 非正式版本，請勿分享此連結</span>
+  <span id="dev-version" style="opacity:.7">v1.2.0-dev · 2026-06-07</span>
+  <button onclick="document.getElementById('dev-banner').style.display='none'"
+    style="background:none;border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">關閉</button>
+</div>
+<div style="height:36px"></div>
+<div class="grid-bg"></div>
+
+<div id="auth-screen">
+  <div style="font-size:40px">💳</div>
+  <h1>個人財務儀表板</h1>
+  <p>連接 Google Drive，自動讀取 Moneybook 消費資料與證券持股，每次開啟都是最新資料。</p>
+  <button class="btn-auth" onclick="signIn()">
+    <img src="https://www.google.com/favicon.ico" alt="G"/>使用 Google 帳號登入
+  </button>
+  <p style="font-size:11px;color:#334155;margin-top:8px">僅讀取 Moneybook 資料夾，不寫入任何資料</p>
+</div>
+
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <div style="font-size:14px;color:#94a3b8;font-family:'Space Mono',monospace">讀取中…</div>
+  <div class="load-steps" id="load-steps"></div>
+</div>
+
+<div id="dashboard">
+<div class="wrap">
+  <header>
+    <div class="label">個人財務儀表板 · MONEYBOOK + 證券</div>
+    <h1>消費 &amp; 投資總覽</h1>
+    <div class="meta" id="meta-line">讀取中…</div>
+    <div class="user-badge">
+      <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
+      <span id="user-name"></span>
+      <button class="sign-out-btn" onclick="signOut()">登出</button>
+    </div>
+  </header>
+
+  <div class="stat-grid">
+    <div class="stat-card" style="border-color:#6366f1">
+      <div class="slabel">最新月消費</div>
+      <div class="sval" id="stat-latest" style="color:#6366f1">—</div>
+      <div class="ssub" id="stat-latest-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#06b6d4">
+      <div class="slabel">今年累計</div>
+      <div class="sval" id="stat-ytd" style="color:#06b6d4">—</div>
+      <div class="ssub" id="stat-ytd-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#f97316">
+      <div class="slabel">持股數</div>
+      <div class="sval" id="stat-stocks" style="color:#f97316">—</div>
+      <div class="ssub" id="stat-stocks-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#34d399">
+      <div class="slabel">加權指數</div>
+      <div class="sval" id="stat-taiex" style="color:#34d399">—</div>
+      <div class="ssub" id="stat-taiex-sub">—</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('trend',event)">📈 年度趨勢</button>
+    <button class="tab-btn" onclick="switchTab('heatmap',event)">🔥 月度熱圖</button>
+    <button class="tab-btn" onclick="switchTab('cats',event)">🏷️ 類別分析</button>
+    <button class="tab-btn" onclick="switchTab('monthly',event)">🗓️ 月份詳解</button>
+    <button class="tab-btn" onclick="switchTab('portfolio',event)">📊 投資組合</button>
+  </div>
+
+  <!-- Trend -->
+  <div class="tab-panel active" id="tab-trend">
+    <div class="card"><div class="card-title">年度支出總覽</div><div class="chart-wrap"><canvas id="chart-annual"></canvas></div></div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">生活支出趨勢</div><div class="chart-wrap"><canvas id="chart-lifestyle"></canvas></div></div>
+      <div class="card"><div class="card-title">飲食 vs 購物</div><div class="chart-wrap"><canvas id="chart-food-shop"></canvas></div></div>
+    </div>
+    <div class="insight" id="insight-box"></div>
+  </div>
+
+  <!-- Heatmap -->
+  <div class="tab-panel" id="tab-heatmap">
+    <div class="card">
+      <div class="card-title">月度消費熱圖</div>
+      <div id="heatmap-container" style="overflow-x:auto"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:16px">
+        <span style="color:var(--muted);font-size:11px">低</span>
+        <div id="heatmap-legend" style="display:flex;gap:4px"></div>
+        <span style="color:var(--muted);font-size:11px">高</span>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">歷史高峰月份 TOP 8</div><div id="peak-list"></div></div>
+  </div>
+
+  <!-- Cats -->
+  <div class="tab-panel" id="tab-cats">
+    <div class="card"><div class="card-title">全時段類別分布</div><div id="cat-bars-all"></div></div>
+    <div class="card">
+      <div class="card-title">按年份篩選</div>
+      <div class="month-sel" id="year-sel"></div>
+      <div id="cat-bars-year"></div>
+    </div>
+  </div>
+
+  <!-- Monthly -->
+  <div class="tab-panel" id="tab-monthly">
+    <div class="card">
+      <div class="card-title">選擇月份</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <select id="month-year-sel" style="background:#111128;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:14px;font-family:'Noto Sans TC',sans-serif"></select>
+        <select id="month-mon-sel" style="background:#111128;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:14px;font-family:'Noto Sans TC',sans-serif"></select>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">月份消費明細</div><div id="monthly-content"></div></div>
+  </div>
+
+  <!-- Portfolio -->
+  <div class="tab-panel" id="tab-portfolio">
+    <div class="card-title" style="padding:0 4px;margin-bottom:4px">📡 資料來源：Drive/Moneybook/portfolio.json · 每次更新後上傳覆蓋即自動同步</div>
+    <div class="market-bar" id="market-bar"></div>
+    <div id="portfolio-content"><div class="no-portfolio">載入中…</div></div>
+    <div class="insight" id="portfolio-insight"></div>
+  </div>
+
+  <footer>個人財務儀表板 · Moneybook + 國泰證券 · 資料來自 Google Drive</footer>
+</div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+<script>
+const CLIENT_ID = '386961156297-1rem5r6uusct7ebfvurev0f93s3kor2f.apps.googleusercontent.com';
+const FOLDER_ID = '10-Rndk0dJSwVj3gK16ClzDFYV9fo_MVK';
+const SCOPES   = 'https://www.googleapis.com/auth/drive.readonly openid email profile';
+
+let accessToken = null, allData = {}, portfolio = null;
+
+function signIn(){
+  const c = google.accounts.oauth2.initTokenClient({
+    client_id:CLIENT_ID, scope:SCOPES,
+    callback:async r=>{
+      if(r.error){alert('登入失敗：'+r.error);return}
+      accessToken=r.access_token;
+      document.getElementById('auth-screen').style.display='none';
+      document.getElementById('loading-screen').style.display='flex';
+      await loadAll();
+    }
+  });
+  c.requestAccessToken();
+}
+function signOut(){accessToken=null;document.getElementById('dashboard').style.display='none';document.getElementById('auth-screen').style.display='flex'}
+
+function initSteps(s){document.getElementById('load-steps').innerHTML=s.map(x=>`<div class="load-step">○ ${x}</div>`).join('')}
+function setStep(steps,i,state){const el=document.querySelectorAll('#load-steps .load-step')[i];if(!el)return;el.className='load-step '+state;el.textContent=(state==='done'?'✓ ':state==='active'?'⟳ ':'○ ')+steps[i]}
+
+async function driveGet(url){const r=await fetch(url,{headers:{Authorization:'Bearer '+accessToken}});return r.json()}
+
+async function loadAll(){
+  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','解析 & 建立圖表'];
+  initSteps(steps);
+
+  setStep(steps,0,'active');
+  const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime+desc`);
+  const files=list.files||[];
+  try{const p=await driveGet('https://www.googleapis.com/oauth2/v2/userinfo');document.getElementById('user-name').textContent=p.email||'';if(p.picture)document.getElementById('user-avatar').src=p.picture}catch(e){}
+  setStep(steps,0,'done');
+
+  // CSV
+  setStep(steps,1,'active');
+  const csvFile=files.find(f=>f.name.includes('明細')&&f.name.endsWith('.csv'));
+  let csvText='';
+  if(csvFile){
+    const r=await fetch(`https://www.googleapis.com/drive/v3/files/${csvFile.id}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}});
+    csvText=await r.text();
+  }
+  setStep(steps,1,'done');
+
+  // Portfolio JSON
+  setStep(steps,2,'active');
+  const pfFile=files.find(f=>f.name==='portfolio.json');
+  if(pfFile){
+    const r=await fetch(`https://www.googleapis.com/drive/v3/files/${pfFile.id}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}});
+    try{portfolio=await r.json()}catch(e){portfolio=null}
+  }
+  setStep(steps,2,'done');
+
+  setStep(steps,3,'active');
+  if(csvText){
+    const rows=Papa.parse(csvText,{header:true,skipEmptyLines:true}).data;
+    allData=processData(rows,csvFile?.name,csvFile?.modifiedTime);
+  }
+  renderDashboard();
+  setStep(steps,3,'done');
+  setTimeout(()=>{document.getElementById('loading-screen').style.display='none';document.getElementById('dashboard').style.display='block'},400);
+}
+
+// ── Data Processing ──────────────────────────────────────
+const EXCLUDE=['繳信用卡費','帳戶互轉','電子票證加值','還款','薪資','投資買賣','外幣買賣','轉定存'];
+const LIFESTYLE_X=['家用費'];
+const fmtN=n=>'NT$'+Number(n).toLocaleString();
+const fmtK=n=>n>=1000000?(n/1000000).toFixed(1)+'M':n>=1000?(n/1000).toFixed(0)+'k':String(Math.round(n));
+const CAT_COLORS=['#6366f1','#f97316','#06b6d4','#ec4899','#34d399','#fbbf24','#a78bfa','#f43f5e','#64748b','#0ea5e9'];
+
+function processData(rows,fname,modTime){
+  let txns=rows.map(r=>({
+    date:new Date(r['消費日']||r['日期']),
+    amount:parseFloat(String(r['金額']).replace(/,/g,''))||0,
+    cat:(r['分類']||'尚未分類').trim(),
+    desc:(r['明細描述']||r['備註']||'').trim(),
+    currency:(r['幣別']||'TWD').trim()
+  })).filter(r=>r.date&&!isNaN(r.date)&&r.amount<0&&r.currency==='TWD');
+  txns=txns.map(r=>({...r,amount:Math.abs(r.amount)}));
+  const seen=new Set();
+  txns=txns.filter(r=>{const k=`${r.date.toISOString().slice(0,10)}_${r.amount}_${r.desc}`;if(seen.has(k))return false;seen.add(k);return true});
+  const real=txns.filter(r=>!EXCLUDE.includes(r.cat));
+  const byYear={};
+  real.forEach(r=>{
+    const y=r.date.getFullYear();
+    if(!byYear[y])byYear[y]={total:0,txns:0,cats:{},lifestyle:0,byMonth:{}};
+    byYear[y].total+=r.amount;byYear[y].txns++;
+    byYear[y].cats[r.cat]=(byYear[y].cats[r.cat]||0)+r.amount;
+    if(!LIFESTYLE_X.includes(r.cat))byYear[y].lifestyle+=r.amount;
+    const m=r.date.getMonth()+1;
+    byYear[y].byMonth[m]=(byYear[y].byMonth[m]||0)+r.amount;
+  });
+  const byYM={};
+  real.forEach(r=>{const k=`${r.date.getFullYear()}-${String(r.date.getMonth()+1).padStart(2,'0')}`;byYM[k]=(byYM[k]||0)+r.amount});
+  const allCats={};
+  real.forEach(r=>{allCats[r.cat]=(allCats[r.cat]||0)+r.amount});
+  const curYear=new Date().getFullYear();
+  const yearData=byYear[curYear]||{total:0,txns:0,byMonth:{}};
+  const months=Object.keys(yearData.byMonth||{});
+  const monthCount=months.length||1;
+  const latestMonth=Math.max(...months.map(Number));
+  const latestAmt=(yearData.byMonth||{})[latestMonth]||0;
+  return{byYear,byYM,allCats,real,totalTxns:txns.length,curYear,yearData,monthCount,latestMonth,latestAmt,fname,modTime};
+}
+
+// ── Render ────────────────────────────────────────────────
+let chartInstances={};
+function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id]}}
+function makeChart(id,config){destroyChart(id);const ctx=document.getElementById(id).getContext('2d');chartInstances[id]=new Chart(ctx,config)}
+const MONTHS_LABEL=['','1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+function renderDashboard(){
+  const d=allData;
+  const modDate=d.modTime?new Date(d.modTime).toLocaleDateString('zh-TW'):'—';
+  const pfDate=portfolio?._meta?.updated||'—';
+  document.getElementById('meta-line').textContent=`消費：${d.fname||'—'} (${modDate}) · 持股：${pfDate}`;
+
+  // Stats
+  if(d.latestMonth){
+    document.getElementById('stat-latest').textContent=fmtK(d.latestAmt);
+    document.getElementById('stat-latest-sub').textContent=`${d.curYear} 年 ${MONTHS_LABEL[d.latestMonth]}`;
+    document.getElementById('stat-ytd').textContent=fmtK(d.yearData.total);
+    document.getElementById('stat-ytd-sub').textContent=`${d.curYear} 年前 ${d.monthCount} 個月`;
+  }
+  if(portfolio){
+    document.getElementById('stat-stocks').textContent=portfolio.holdings.length+' 檔';
+    document.getElementById('stat-stocks-sub').textContent=portfolio._meta.account||'';
+    const t=portfolio.market;
+    const up=t.taiex_change>=0;
+    document.getElementById('stat-taiex').textContent=t.taiex.toLocaleString();
+    document.getElementById('stat-taiex').style.color=up?'#f87171':'#34d399';
+    document.getElementById('stat-taiex-sub').textContent=`${up?'▲':'▼'} ${Math.abs(t.taiex_change_pct)}% (${t.date})`;
+  }
+
+  if(d.byYear)renderTrend(d);
+  if(d.byYM)renderHeatmap(d);
+  if(d.allCats)renderCats(d);
+  if(d.byYear)renderMonthly(d);
+  renderPortfolio();
+  if(d.byYear)renderInsight(d);
+}
+
+function renderTrend(d){
+  const years=Object.keys(d.byYear).sort();
+  const gc='#1e293b',tc='#64748b';
+  makeChart('chart-annual',{type:'bar',data:{labels:years,datasets:[{data:years.map(y=>Math.round(d.byYear[y].total)),backgroundColor:years.map(y=>y==d.curYear?'#6366f1':'#1e3a5f'),borderRadius:6,borderSkipped:false}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtN(c.raw)}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+  const lsY=years.filter(y=>d.byYear[y].lifestyle>0);
+  makeChart('chart-lifestyle',{type:'line',data:{labels:lsY,datasets:[{data:lsY.map(y=>d.byYear[y].lifestyle),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.4,pointRadius:5,pointBackgroundColor:'#6366f1'}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtN(c.raw)}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+  const fsY=years.filter(y=>parseInt(y)>=2022);
+  makeChart('chart-food-shop',{type:'bar',data:{labels:fsY,datasets:[{label:'飲食',data:fsY.map(y=>Math.round(d.byYear[y]?.cats?.['飲食']||0)),backgroundColor:'#f9741688',borderRadius:4},{label:'購物',data:fsY.map(y=>Math.round((d.byYear[y]?.cats?.['購物']||0)+(d.byYear[y]?.cats?.['服飾']||0))),backgroundColor:'#06b6d488',borderRadius:4}]},options:{plugins:{legend:{labels:{color:'#94a3b8'}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmtN(c.raw)}`}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+}
+
+function renderHeatmap(d){
+  const years=Object.keys(d.byYear).map(Number).sort();
+  const max=Math.max(...Object.values(d.byYM),1);
+  function heatColor(v){if(!v)return'#0d0d1f';const p=Math.min(v/max,1);if(p<.15)return'#1e3a5f22';if(p<.35)return'#1e3a5f66';if(p<.55)return'#2563eb88';if(p<.75)return'#3b82f6bb';return'#60a5fa'}
+  const cont=document.getElementById('heatmap-container');
+  let html='<div style="min-width:560px"><div style="display:grid;grid-template-columns:44px repeat(12,1fr);gap:4px;margin-bottom:6px"><div></div>';
+  for(let m=1;m<=12;m++)html+=`<div class="hm-header">${m}月</div>`;
+  html+='</div>';
+  years.forEach(y=>{
+    html+=`<div style="display:grid;grid-template-columns:44px repeat(12,1fr);gap:4px;margin-bottom:4px"><div class="hm-label">${y}</div>`;
+    for(let m=1;m<=12;m++){const k=`${y}-${String(m).padStart(2,'0')}`;const v=d.byYM[k]||0;html+=`<div class="heatmap-cell" style="background:${heatColor(v)};color:${v>100000?'#bfdbfe':'transparent'}" title="${v?`${y}/${m}: ${fmtN(v)}`:`${y}/${m}: 無資料`}">${v>50000?fmtK(v):''}</div>`}
+    html+='</div>';
+  });
+  html+='</div>';
+  cont.innerHTML=html;
+  const leg=document.getElementById('heatmap-legend');
+  [.1,.3,.5,.7,.95].forEach(p=>{const el=document.createElement('div');el.style.cssText=`width:28px;height:16px;border-radius:4px;background:${heatColor(p*max)}`;leg.appendChild(el)});
+  const sorted=Object.entries(d.byYM).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  document.getElementById('peak-list').innerHTML=sorted.map(([ym,amt],i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;background:var(--dim);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;font-family:'Space Mono',monospace">${String(i+1).padStart(2,'0')}</div><span style="color:var(--text);font-family:'Space Mono',monospace;font-size:14px">${ym}</span></div><span style="color:#f97316;font-weight:700;font-size:14px;font-family:'Space Mono',monospace">${fmtN(Math.round(amt))}</span></div>`).join('');
+}
+
+function renderCatBars(cats,container){
+  const sorted=Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  const max=sorted[0]?.[1]||1,total=sorted.reduce((s,[,v])=>s+v,0);
+  container.innerHTML=sorted.map(([name,val],i)=>`<div class="bar-row"><div class="bar-row-label"><span>${name}</span><span>${fmtN(Math.round(val))} <span style="color:var(--muted);font-size:11px">${(val/total*100).toFixed(1)}%</span></span></div><div class="bar-track"><div class="bar-fill" style="width:${(val/max*100).toFixed(1)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('');
+}
+
+function renderCats(d){
+  renderCatBars(d.allCats,document.getElementById('cat-bars-all'));
+  const years=Object.keys(d.byYear).sort().reverse();
+  document.getElementById('year-sel').innerHTML=years.map(y=>`<button class="month-btn ${y==d.curYear?'active':''}" onclick="selectYear(${y},event)">${y}</button>`).join('');
+  window.selectYear=function(y,e){document.querySelectorAll('#year-sel .month-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');renderCatBars(d.byYear[y]?.cats||{},document.getElementById('cat-bars-year'))};
+  renderCatBars(d.byYear[d.curYear]?.cats||{},document.getElementById('cat-bars-year'));
+}
+
+function renderMonthly(d){
+  const years=Object.keys(d.byYear).sort().reverse();
+  const ySel=document.getElementById('month-year-sel');
+  ySel.innerHTML=years.map(y=>`<option value="${y}">${y} 年</option>`).join('');
+  function updateMSel(){const y=parseInt(ySel.value);const months=Object.keys(d.byYear[y]?.byMonth||{}).map(Number).sort().reverse();document.getElementById('month-mon-sel').innerHTML=months.map(m=>`<option value="${m}">${m} 月</option>`).join('');updateDetail()}
+  function updateDetail(){
+    const y=parseInt(ySel.value),m=parseInt(document.getElementById('month-mon-sel').value);
+    const amt=(d.byYear[y]?.byMonth||{})[m]||0;
+    const txns=d.real.filter(r=>r.date.getFullYear()===y&&r.date.getMonth()+1===m).sort((a,b)=>b.amount-a.amount);
+    const cats={};txns.forEach(r=>{cats[r.cat]=(cats[r.cat]||0)+r.amount});
+    document.getElementById('monthly-content').innerHTML=`<div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap"><div style="background:var(--dim);border-radius:10px;padding:14px 20px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">總消費</div><div style="color:#6366f1;font-size:22px;font-weight:900;font-family:'Space Mono',monospace">${fmtN(Math.round(amt))}</div></div><div style="background:var(--dim);border-radius:10px;padding:14px 20px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">筆數</div><div style="color:#06b6d4;font-size:22px;font-weight:900;font-family:'Space Mono',monospace">${txns.length}</div></div></div><div style="margin-bottom:20px"><div style="color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:12px">類別</div>${Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>`<div class="bar-row"><div class="bar-row-label"><span>${c}</span><span>${fmtN(Math.round(v))} <span style="color:var(--muted);font-size:11px">${(v/amt*100).toFixed(1)}%</span></span></div><div class="bar-track"><div class="bar-fill" style="width:${(v/Math.max(...Object.values(cats))*100).toFixed(1)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('')}</div><div><div style="color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:12px">TOP 15 消費</div>${txns.slice(0,15).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)"><div><div style="font-size:13px;color:var(--text)">${r.desc||r.cat}</div><div style="font-size:11px;color:var(--muted)">${r.date.toLocaleDateString('zh-TW')} · ${r.cat}</div></div><div style="font-weight:700;font-size:13px;font-family:'Space Mono',monospace;color:#7dd3fc">${fmtN(Math.round(r.amount))}</div></div>`).join('')}</div>`;
+  }
+  ySel.onchange=updateMSel;document.getElementById('month-mon-sel').onchange=updateDetail;updateMSel();
+}
+
+function renderPortfolio(){
+  if(!portfolio){document.getElementById('portfolio-content').innerHTML='<div class="no-portfolio">⚠️ 找不到 portfolio.json，請將檔案上傳至 Google Drive Moneybook 資料夾。</div>';return}
+  const m=portfolio.market;
+  const up=m.taiex_change>=0;
+  document.getElementById('market-bar').innerHTML=`
+    <div class="mbar-item"><div class="mbar-label">加權指數</div><div class="mbar-val" style="color:${up?'#f87171':'#34d399'}">${m.taiex.toLocaleString()}</div><div style="color:${up?'#f87171':'#34d399'};font-size:12px;margin-top:4px">${up?'▲':'▼'} ${Math.abs(m.taiex_change)} (${m.taiex_change_pct}%)</div></div>
+    <div class="mbar-item"><div class="mbar-label">成交金額</div><div class="mbar-val" style="color:#94a3b8">${m.volume_b.toLocaleString()}億</div></div>
+    <div class="mbar-item"><div class="mbar-label">資料日期</div><div class="mbar-val" style="color:#64748b;font-size:16px">${m.date}</div></div>`;
+
+  const signalClass=s=>{
+    if(s.includes('買超')||s.includes('新高')||s.includes('毛利')||s.includes('營益'))return'signal-good';
+    if(s.includes('死亡')||s.includes('賣超')||s.includes('翻黑'))return'signal-warn';
+    return'signal-neu';
+  };
+
+  document.getElementById('portfolio-content').innerHTML=portfolio.holdings.map(h=>{
+    const up=h.change>0,dn=h.change<0;
+    const cls=up?'up':dn?'down':'flat';
+    const arrow=up?'▲':dn?'▼':'';
+    const events=h.events.map(e=>`<div class="event-badge">🔔 ${e.type} ${e.date} · 配息 ${e.dividend}元 · 預估入帳 NT$${e.estimated_income} · 發放 ${e.pay_date}</div>`).join('');
+    const signals=h.signals.map(s=>`<span class="signal-tag ${signalClass(s)}">${s}</span>`).join('');
+    const report=h.report?`<div style="color:#64748b;font-size:12px;margin-top:8px;font-style:italic">📋 ${h.report}</div>`:'';
+    return`<div class="stock-card">
+      <div class="stock-header">
+        <div><div class="stock-name">${h.name}</div><div class="stock-code">${h.code} · ${h.broker}</div></div>
+        <div class="stock-price">
+          <div class="price ${cls}">${h.price.toLocaleString()}</div>
+          <div class="chg ${cls}">${arrow} ${Math.abs(h.change)} (${Math.abs(h.change_pct)}%)</div>
+          <div style="color:var(--muted);font-size:11px;margin-top:2px">量 ${h.volume.toLocaleString()} 張</div>
+        </div>
+      </div>
+      ${events}
+      <div class="signals">${signals}</div>
+      ${report}
+    </div>`;
+  }).join('');
+
+  // Insight
+  const warns=portfolio.holdings.flatMap(h=>h.signals.filter(s=>s.includes('死亡')||s.includes('翻黑')||s.includes('賣超')));
+  const goods=portfolio.holdings.flatMap(h=>h.signals.filter(s=>s.includes('買超')||s.includes('新高')));
+  document.getElementById('portfolio-insight').innerHTML=`<div class="insight-title">💡 投資組合洞察</div>
+    <div class="insight-row"><span style="font-size:18px">📊</span><p>持有 <strong>${portfolio.holdings.length} 檔</strong>（${portfolio._meta.account}），資料更新至 <strong>${portfolio.market.date}</strong>。</p></div>
+    ${warns.length?`<div class="insight-row"><span style="font-size:18px">⚠️</span><p>本日有 <strong style="color:#f87171">${warns.length} 個警示訊號</strong>，包含 KD 死亡交叉與主力賣超，建議留意短線風險。</p></div>`:''}
+    ${goods.length?`<div class="insight-row"><span style="font-size:18px">✅</span><p>有 <strong style="color:#34d399">${goods.length} 個正向訊號</strong>，台新新光金投信連買，動能較強。</p></div>`:''}
+    <div class="insight-row"><span style="font-size:18px">🔄</span><p>每次收到國泰 AI投資日報後，讓 Claude 更新 <strong>portfolio.json</strong> 並上傳至 Drive，下次開啟即自動同步。</p></div>`;
+}
+
+function renderInsight(d){
+  const years=Object.keys(d.byYear).map(Number).sort();
+  const lastY=years[years.length-1],prevY=years[years.length-2];
+  const diff=prevY?Math.round((d.byYear[lastY].lifestyle-d.byYear[prevY].lifestyle)/d.byYear[prevY].lifestyle*100):0;
+  const topCat=Object.entries(d.byYear[lastY]?.cats||{}).sort((a,b)=>b[1]-a[1])[0];
+  document.getElementById('insight-box').innerHTML=`<div class="insight-title">💡 消費洞察</div>
+    <div class="insight-row"><span style="font-size:18px">📅</span><p>資料涵蓋 <strong>${years[0]}–${lastY}</strong>，共 <strong>${d.totalTxns.toLocaleString()} 筆</strong>交易。</p></div>
+    <div class="insight-row"><span style="font-size:18px">${diff>0?'📈':'📉'}</span><p>${lastY} 年生活支出相比 ${prevY} 年<strong style="color:${diff>0?'#f87171':'#34d399'}">${diff>0?'增加':'減少'} ${Math.abs(diff)}%</strong>。</p></div>
+    <div class="insight-row"><span style="font-size:18px">🏆</span><p>${lastY} 年最大消費類別：<strong>${topCat?.[0]||'—'}</strong>（${fmtN(Math.round(topCat?.[1]||0))}）。</p></div>`;
+}
+
+function switchTab(name,e){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+}
+</script>
+</body>
+</html>
