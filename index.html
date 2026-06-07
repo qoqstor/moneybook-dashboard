@@ -236,7 +236,7 @@
 <script>
 const CLIENT_ID = '386961156297-1rem5r6uusct7ebfvurev0f93s3kor2f.apps.googleusercontent.com';
 const FOLDER_ID = '10-Rndk0dJSwVj3gK16ClzDFYV9fo_MVK';
-const SCOPES   = 'https://www.googleapis.com/auth/drive.readonly openid email profile';
+const SCOPES   = 'https://www.googleapis.com/auth/drive.readonly https://www.googleapis.com/auth/gmail.readonly openid email profile';
 
 let accessToken = null, allData = {}, portfolio = null;
 
@@ -267,7 +267,13 @@ async function loadAll(){
   setStep(steps,0,'active');
   const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime+desc`);
   const files=list.files||[];
-  try{const p=await driveGet('https://www.googleapis.com/oauth2/v2/userinfo');document.getElementById('user-name').textContent=p.email||'';if(p.picture)document.getElementById('user-avatar').src=p.picture}catch(e){}
+  try{
+      const p=await driveGet('https://www.googleapis.com/drive/v3/about?fields=user');
+      if(p.user){
+        document.getElementById('user-name').textContent=p.user.emailAddress||'';
+        document.getElementById('user-avatar').src=p.user.photoLink||'';
+      }
+    }catch(e){}
   setStep(steps,0,'done');
 
   // CSV
