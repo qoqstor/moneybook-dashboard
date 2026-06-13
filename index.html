@@ -154,23 +154,89 @@
 <div id="auth-screen">
   <div style="font-size:40px">💳</div>
   <h1>個人財務儀表板</h1>
-  <p>連接 Google Drive，自動讀取 Moneybook 消費資料與證券持股，每次開啟都是最新資料。</p>
+  <p>登入後自動帶入您的 Google Drive 設定，免手動輸入。</p>
 
-  <div id="cfg-panel" style="width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:18px 20px;font-size:13px;">
-    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:12px;font-family:'Space Mono',monospace">⚙️ 連線設定</div>
+  <!-- Message -->
+  <div id="auth-msg" style="min-height:18px;font-size:13px;font-family:'Space Mono',monospace;color:#f87171"></div>
+
+  <!-- ── Login Panel ── -->
+  <div id="panel-login" style="width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">🔐 登入</div>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Email</label>
+    <input id="login-email" type="email" autocomplete="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">密碼</label>
+    <input id="login-pwd" type="password" autocomplete="current-password" placeholder="••••••••"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:14px;font-family:'Space Mono',monospace"
+      onkeydown="if(event.key==='Enter')window.doLogin()"/>
+    <button onclick="window.doLogin()"
+      style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      登入
+    </button>
+    <div style="display:flex;justify-content:space-between;font-size:12px">
+      <a href="#" onclick="window.showPanel('panel-register');return false" style="color:#818cf8;text-decoration:none">還沒帳號？註冊</a>
+      <a href="#" onclick="window.showPanel('panel-forgot');return false" style="color:#64748b;text-decoration:none">忘記密碼</a>
+    </div>
+    <div style="text-align:center;margin-top:10px"><a href="#" onclick="window.showPanel('panel-cfg');return false" style="color:#334155;font-size:11px;text-decoration:none">手動輸入設定</a></div>
+  </div>
+
+  <!-- ── Register Panel ── -->
+  <div id="panel-register" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">📝 建立帳號</div>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Email</label>
+    <input id="reg-email" type="email" autocomplete="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">密碼（至少 6 碼）</label>
+    <input id="reg-pwd" type="password" autocomplete="new-password" placeholder="••••••••"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="reg-cid" type="text" autocomplete="off" placeholder="xxx.apps.googleusercontent.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="reg-fid" type="text" autocomplete="off" placeholder="Google Drive Folder ID"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')window.doRegister()"/>
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px;font-size:11px;color:#475569;margin-bottom:14px;line-height:1.6">
+      🔒 CLIENT_ID &amp; FOLDER_ID 以 AES-256 加密儲存，伺服器無法讀取原始值。
+    </div>
+    <button onclick="window.doRegister()"
+      style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      建立帳號
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
+  </div>
+
+  <!-- ── Forgot Panel ── -->
+  <div id="panel-forgot" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">📧 重設密碼</div>
+    <p style="color:#64748b;font-size:12px;margin-bottom:12px;line-height:1.6">輸入您的 Email，我們會寄送密碼重設連結。</p>
+    <input id="forgot-email" type="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:14px;font-family:'Space Mono',monospace"
+      onkeydown="if(event.key==='Enter')window.doForgot()"/>
+    <button onclick="window.doForgot()"
+      style="width:100%;background:#1e3a5f;border:none;color:#7dd3fc;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      寄送重設信
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
+  </div>
+
+  <!-- ── Manual Config Panel (fallback) ── -->
+  <div id="panel-cfg" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">⚙️ 手動設定</div>
     <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
     <input id="cfg-client-id" type="password" autocomplete="off" placeholder="xxx.apps.googleusercontent.com"
       style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
     <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
     <input id="cfg-folder-id" type="password" autocomplete="off" placeholder="Google Drive Folder ID"
-      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:4px"/>
-    <p style="font-size:10px;color:#475569;margin:6px 0 0">設定儲存於此裝置 localStorage，不傳送至任何伺服器。</p>
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"/>
+    <button onclick="window.doCfgLogin()"
+      style="width:100%;background:#1e3a5f;border:none;color:#7dd3fc;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      使用 Google 帳號登入
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
   </div>
 
-  <button class="btn-auth" onclick="signIn()">
-    <img src="https://www.google.com/favicon.ico" alt="G"/>使用 Google 帳號登入
-  </button>
-  <p style="font-size:11px;color:#334155;margin-top:8px">讀寫 Moneybook 資料夾與 Gmail 對帳單</p>
+  <p style="font-size:11px;color:#1e293b;margin-top:8px">讀寫 Moneybook 資料夾與 Gmail 對帳單</p>
 </div>
 
 <!-- Loading -->
@@ -323,75 +389,190 @@
 </div>
 
 <script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<!-- Firebase module -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+         sendPasswordResetEmail, signOut as fbSignOut
+       } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore, doc, setDoc, getDoc, serverTimestamp
+       } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCfRjk1dr6HDDyTpOkgx4yUV4fv7n1iqdE",
+  authDomain: "moneybook-43a3e.firebaseapp.com",
+  projectId: "moneybook-43a3e",
+  storageBucket: "moneybook-43a3e.firebasestorage.app",
+  messagingSenderId: "949542144949",
+  appId: "1:949542144949:web:e733221a985316ef5f67fc"
+};
+const fbApp  = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDb   = getFirestore(fbApp);
+
+// AES-GCM: CLIENT_ID/FOLDER_ID 加密存 Firestore，解密在本機
+async function deriveKey(uid, pwd){
+  const raw = new TextEncoder().encode(uid+':'+pwd);
+  const km  = await crypto.subtle.importKey('raw',raw,'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:new TextEncoder().encode(uid),iterations:100000,hash:'SHA-256'},
+    km,{name:'AES-GCM',length:256},false,['encrypt','decrypt']
+  );
+}
+async function aesEncrypt(text,key){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...iv)+String.fromCharCode(...new Uint8Array(enc)));
+}
+async function aesDecrypt(b64,key){
+  const raw=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const dec=await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.slice(0,12)},key,raw.slice(12));
+  return new TextDecoder().decode(dec);
+}
+
+function setAuthMsg(msg,color='#f87171'){
+  const el=document.getElementById('auth-msg');
+  if(el){el.textContent=msg;el.style.color=color;}
+}
+
+function showPanel(id){
+  ['panel-login','panel-register','panel-forgot','panel-cfg'].forEach(p=>{
+    const el=document.getElementById(p);
+    if(el) el.style.display=p===id?'block':'none';
+  });
+}
+window.showPanel=showPanel;
+
+window.doRegister=async function(){
+  const email=document.getElementById('reg-email').value.trim();
+  const pwd  =document.getElementById('reg-pwd').value;
+  const cid  =document.getElementById('reg-cid').value.trim();
+  const fid  =document.getElementById('reg-fid').value.trim();
+  if(!email||!pwd||!cid||!fid){setAuthMsg('請填寫所有欄位');return;}
+  if(pwd.length<6){setAuthMsg('密碼至少 6 碼');return;}
+  try{
+    setAuthMsg('建立帳號中…','#94a3b8');
+    const cred=await createUserWithEmailAndPassword(fbAuth,email,pwd);
+    const uid=cred.user.uid;
+    const key=await deriveKey(uid,pwd);
+    await setDoc(doc(fbDb,'users',uid),{
+      email, createdAt:serverTimestamp(),
+      encClientId:await aesEncrypt(cid,key),
+      encFolderId:await aesEncrypt(fid,key)
+    });
+    setAuthMsg('帳號建立成功！','#34d399');
+    sessionStorage.setItem('mb_cid',cid);
+    sessionStorage.setItem('mb_fid',fid);
+    setTimeout(()=>window._launchOAuth(cid,fid),600);
+  }catch(e){
+    setAuthMsg(e.code==='auth/email-already-in-use'?'Email 已被使用':'錯誤：'+e.message);
+  }
+};
+
+window.doLogin=async function(){
+  const email=document.getElementById('login-email').value.trim();
+  const pwd  =document.getElementById('login-pwd').value;
+  if(!email||!pwd){setAuthMsg('請輸入帳號密碼');return;}
+  try{
+    setAuthMsg('登入中…','#94a3b8');
+    const cred=await signInWithEmailAndPassword(fbAuth,email,pwd);
+    const snap=await getDoc(doc(fbDb,'users',cred.user.uid));
+    if(!snap.exists()){setAuthMsg('找不到帳號資料');return;}
+    const key=await deriveKey(cred.user.uid,pwd);
+    const d=snap.data();
+    const cid=await aesDecrypt(d.encClientId,key);
+    const fid=await aesDecrypt(d.encFolderId,key);
+    setAuthMsg('登入成功！','#34d399');
+    sessionStorage.setItem('mb_cid',cid);
+    sessionStorage.setItem('mb_fid',fid);
+    setTimeout(()=>window._launchOAuth(cid,fid),400);
+  }catch(e){
+    setAuthMsg(e.code==='auth/invalid-credential'?'帳號或密碼錯誤':'錯誤：'+e.message);
+  }
+};
+
+window.doForgot=async function(){
+  const email=document.getElementById('forgot-email').value.trim();
+  if(!email){setAuthMsg('請輸入 Email');return;}
+  try{
+    await sendPasswordResetEmail(fbAuth,email);
+    setAuthMsg('重設信已寄出，請檢查信箱','#34d399');
+  }catch(e){setAuthMsg('寄送失敗：'+e.message);}
+};
+
+window.fbDoSignOut=async function(){
+  sessionStorage.removeItem('mb_cid');
+  sessionStorage.removeItem('mb_fid');
+  try{await fbSignOut(fbAuth);}catch(e){}
+};
+
+window.doCfgLogin=function(){
+  const cid=document.getElementById('cfg-client-id').value.trim();
+  const fid=document.getElementById('cfg-folder-id').value.trim();
+  if(!cid){setAuthMsg('請輸入 OAuth Client ID');return;}
+  if(!fid){setAuthMsg('請輸入 Drive 資料夾 ID');return;}
+  window._launchOAuth(cid,fid);
+};
+</script>
+
 <script>
-// ── Config (stored in localStorage, not hardcoded) ────────
-const SCOPES    = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.readonly openid email profile';
-const YUANTA_SENDER = 'ebillservice@bhu.yuanta.com.tw';
+// ── Config ────────────────────────────────────────────────
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.readonly openid email profile';
+window._SCOPES = SCOPES;  // expose for Firebase module
+const YUANTA_SENDER  = 'ebillservice@bhu.yuanta.com.tw';
 const YUANTA_SUBJECT = '元大證券電子綜合月對帳單';
-const CFG_KEY = 'mbcfg_v1';
+const PDF_PWD_KEY    = 'yuanta_pdf_pwd';
 
-function loadConfig(){
-  try{ return JSON.parse(localStorage.getItem(CFG_KEY)||'{}'); }catch{return {};}
-}
-function saveConfig(obj){
-  localStorage.setItem(CFG_KEY, JSON.stringify({...loadConfig(),...obj}));
-}
-function getClientId(){ return loadConfig().clientId||''; }
-function getFolderId(){ return loadConfig().folderId||''; }
+// Runtime config — populated by _launchOAuth callback
+let CLIENT_ID = '', FOLDER_ID = '', accessToken = null;
 
-// ── Runtime config vars (set on login) ───────────────────
-let CLIENT_ID = '', FOLDER_ID = '';
-const PDF_PWD_KEY   = 'yuanta_pdf_pwd';
+// Bridge: Firebase module calls window._launchOAuth(cid,fid)
+window._launchOAuth = function(cid, fid){
+  CLIENT_ID = cid;
+  FOLDER_ID = fid;
+  document.getElementById('auth-screen').style.display='none';
+  document.getElementById('loading-screen').style.display='flex';
+  const tryInit=()=>{
+    if(window.google?.accounts?.oauth2){
+      const c=google.accounts.oauth2.initTokenClient({
+        client_id:cid, scope:SCOPES,
+        callback:async r=>{
+          if(r.error){
+            alert('Google 登入失敗：'+r.error);
+            document.getElementById('auth-screen').style.display='flex';
+            document.getElementById('loading-screen').style.display='none';
+            return;
+          }
+          accessToken=r.access_token;
+          await loadAll();
+        }
+      });
+      c.requestAccessToken();
+    } else { setTimeout(tryInit,200); }
+  };
+  tryInit();
+};
 
 // PDF.js worker
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
 
 // ── State ─────────────────────────────────────────────────
-let accessToken = null, allData = {}, portfolio = null, yuantaHistory = null;
+let allData = {}, portfolio = null, yuantaHistory = null;
 let pwdResolve = null;
 
-// Pre-fill config inputs from localStorage
-window.addEventListener('DOMContentLoaded', ()=>{
-  const cfg = loadConfig();
-  const cidEl = document.getElementById('cfg-client-id');
-  const fidEl = document.getElementById('cfg-folder-id');
-  if(cidEl && cfg.clientId) cidEl.value = cfg.clientId;
-  if(fidEl && cfg.folderId) fidEl.value = cfg.folderId;
-  // Show/hide config panel: hide if already configured
-  const panel = document.getElementById('cfg-panel');
-  if(panel && cfg.clientId && cfg.folderId){
-    panel.style.display = 'none'; // hidden but values still loaded
-  }
-});
+
 
 // ── Auth ──────────────────────────────────────────────────
-function signIn(){
-  // Load config from inputs or localStorage
-  const inputCid = document.getElementById('cfg-client-id')?.value.trim();
-  const inputFid = document.getElementById('cfg-folder-id')?.value.trim();
-  if(inputCid) saveConfig({clientId:inputCid});
-  if(inputFid) saveConfig({folderId:inputFid});
-  CLIENT_ID = getClientId();
-  FOLDER_ID = getFolderId();
-  if(!CLIENT_ID){ alert('請輸入 OAuth Client ID'); return; }
-  if(!FOLDER_ID){ alert('請輸入 Drive 資料夾 ID'); return; }
-  const c = google.accounts.oauth2.initTokenClient({
-    client_id:CLIENT_ID, scope:SCOPES,
-    callback:async r=>{
-      if(r.error){alert('登入失敗：'+r.error);return}
-      accessToken=r.access_token;
-      document.getElementById('auth-screen').style.display='none';
-      document.getElementById('loading-screen').style.display='flex';
-      await loadAll();
-    }
-  });
-  c.requestAccessToken();
-}
+function signIn(){ /* legacy no-op; kept so old references don't throw */ }
 function signOut(){
   accessToken=null;
   sessionStorage.removeItem(PDF_PWD_KEY);
+  if(window.fbDoSignOut) window.fbDoSignOut();
   document.getElementById('dashboard').style.display='none';
   document.getElementById('auth-screen').style.display='flex';
+  // Reset to login panel
+  if(window.showPanel) window.showPanel('panel-login');
 }
 
 // ── Loading Steps ─────────────────────────────────────────
