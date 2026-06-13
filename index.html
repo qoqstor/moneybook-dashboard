@@ -350,6 +350,7 @@
       <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
         <button onclick="startGmailSync()" style="background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📧 Gmail 自動同步</button>
         <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
+        <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
         <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
       </div>
       <!-- Drop zone -->
@@ -940,64 +941,44 @@ async function parsePdf(arrayBuffer, password){
 }
 
 function extractYuantaData(text, filename){
-  // 月份：YYYYMM from filename 元大證券電子綜合月對帳單_YYYYMM.pdf
+  // 月份
   let month='';
   const mMatch=filename.match(/(\d{6})/);
   if(mMatch)month=mMatch[1];
-  // fallback: extract from text
   if(!month){const tm=text.match(/(\d{4})年\s*(\d{1,2})月/);if(tm)month=`${tm[1]}${tm[2].padStart(2,'0')}`}
 
-  // 市值 — search for "市值" followed by number
+  // 市值 — 取所有符合值的最大值（避免抓到小計）
   let marketValue=0;
-  const mvPatterns=[
-    /市值[^\d]*?([\d,]+)/,
-    /總市值[^\d]*?([\d,]+)/,
-    /持股市值[^\d]*?([\d,]+)/,
-  ];
-  for(const p of mvPatterns){const m=text.match(p);if(m){marketValue=parseInt(m[1].replace(/,/g,''));break}}
+  const mvAll=[...text.matchAll(/(?:總?市值|持股市值)[^\d\n]*([\d,]+)/g)];
+  if(mvAll.length){const vals=mvAll.map(m=>parseInt(m[1].replace(/,/g,'')));marketValue=Math.max(...vals);}
 
-  // 成本 — 元大 PDF 常見格式：「買進成本 1,234,567」或表格欄位
+  // 成本 — 取最大值
   let cost=0;
-  const costPatterns=[
-    /買進成本[\s:\uff1a]*([\d,]+)/,
-    /持股成本[\s:\uff1a]*([\d,]+)/,
-    /成本[\s:\uff1a]*([\d,]+)/,
-    /原始成本[\s:\uff1a]*([\d,]+)/,
-  ];
-  for(const p of costPatterns){const m=text.match(p);if(m){cost=parseInt(m[1].replace(/,/g,''));break}}
+  const costAll=[...text.matchAll(/(?:買進|持股|原始)?成本[^\d\n]*([\d,]+)/g)];
+  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,'')));cost=Math.max(...vals);}
 
-  // 損益 — 支援負號、括號負數 (1,234)
+  // 損益 — 先找括號負數，再找一般格式
   let pnl=0;
-  const pnlPatterns=[
-    /未實現損益[\s:\uff1a]*(-?[\d,]+)/,
-    /評估損益[\s:\uff1a]*(-?[\d,]+)/,
-    /損益[\s:\uff1a]*(-?[\d,]+)/,
-    /損益[\s:\uff1a]*\(([\d,]+)\)/,  // (1,234) = negative
-  ];
-  for(const p of pnlPatterns){
-    const m=text.match(p);
-    if(m){
-      // Check if pattern was the bracket-negative one
-      pnl = p.source.includes('\\(') ? -parseInt(m[1].replace(/,/g,'')) : parseInt(m[1].replace(/,/g,''));
-      break;
-    }
-  }
+  const pnlNeg=text.match(/(?:未實現|評估)?損益[^\d\n(]*\(([\d,]+)\)/);
+  if(pnlNeg){pnl=-parseInt(pnlNeg[1].replace(/,/g,''));}
+  else{const pnlPos=text.match(/(?:未實現|評估)?損益[^\d\n]*(-?[\d,]+)/);if(pnlPos)pnl=parseInt(pnlPos[1].replace(/,/g,''));}
 
-  // Holdings: 股票名稱 + 代號 pattern
-  const holdings=[];
-  // Common format: code name shares price value
-  const holdingRegex=/([0-9]{4})\s+([^\d\s][^\d]{1,15}?)\s+([\d,]+)\s+[\d.]+\s+([\d,]+)/g;
+  // Holdings — 以股票代號去重（修正大魯閣等重複顯示問題）
+  const holdingsMap={};
+  const holdingRegex=/\b([0-9]{4})\b\s+([^\d\n]{2,16}?)\s+([\d,]{1,10})\s+[\d.]+\s+([\d,]+)/g;
   let hm;
   while((hm=holdingRegex.exec(text))!==null){
-    holdings.push({
-      code:hm[1],
-      name:hm[2].trim(),
-      shares:parseInt(hm[3].replace(/,/g,'')),
-      value:parseInt(hm[4].replace(/,/g,''))
-    });
+    const code=hm[1],name=hm[2].trim().replace(/\s+/g,'');
+    if(!holdingsMap[code]){
+      holdingsMap[code]={code,name,shares:parseInt(hm[3].replace(/,/g,'')),value:parseInt(hm[4].replace(/,/g,''))};
+    }
   }
+  const holdings=Object.values(holdingsMap);
 
-  return{month, marketValue, cost, pnl, holdings, rawTextLength:text.length};
+  // 市值 fallback：從持股加總
+  if(!marketValue&&holdings.length)marketValue=holdings.reduce((s,h)=>s+h.value,0);
+
+  return{month,marketValue,cost,pnl,holdings,rawTextLength:text.length};
 }
 
 // ── PDF Drop Zone ─────────────────────────────────────────
@@ -1227,6 +1208,62 @@ function renderYuantaHistory(){
       ${holdingsHtml}
     </div>`;
   }).join('');
+}
+
+// ── 國泰 AI 投資日報 → portfolio.json 自動同步 ────────────
+async function syncKgiPortfolio(){
+  syncItems={};syncShow();
+  syncSet('kgi_scan','掃描國泰 AI 投資日報','active');
+  try{
+    const q=encodeURIComponent('subject:【AI投資日報】');
+    const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=5`,
+      {headers:{Authorization:'Bearer '+accessToken}});
+    const data=await res.json();
+    const messages=data.messages||[];
+    if(!messages.length){
+      syncSetState('kgi_scan','err');
+      syncSet('kgi_none','找不到國泰 AI 投資日報','err');
+      syncHide();return;
+    }
+    syncSetState('kgi_scan','done');
+    const detail=await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
+      {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+    syncSet('kgi_parse','解析日報內容','active');
+    function getBody(payload){
+      if(!payload)return'';
+      if(payload.body?.data)return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
+      if(payload.parts){for(const p of payload.parts){const b=getBody(p);if(b)return b;}}
+      return'';
+    }
+    const body=getBody(detail.payload);
+    const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+    const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+    syncSetState('kgi_parse','done');
+    syncSet('kgi_claude','Claude 解析持股資料','active');
+    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',max_tokens:2000,
+        messages:[{role:'user',content:`從以下國泰證券 AI 投資日報提取持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,6000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`}]
+      })
+    });
+    const ai=await resp.json();
+    const raw=ai.content?.[0]?.text||'';
+    let newPortfolio=null;
+    try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+    catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 解析失敗，請手動上傳','err');console.error('Claude raw:',raw);syncHide();return;}
+    syncSetState('kgi_claude','done');
+    syncSet('kgi_upload','上傳 portfolio.json','active');
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('portfolio.json',newPortfolio,existId);
+    syncSetState('kgi_upload','done');
+    portfolio=newPortfolio;renderPortfolio();renderDashboard();
+    syncSet('kgi_done','國泰日報同步完成 ✓','done');
+  }catch(err){syncSet('kgi_err','同步失敗：'+err.message,'err');console.error('KGI sync error',err);}
+  syncHide();
 }
 </script>
 </body>
