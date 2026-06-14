@@ -194,10 +194,13 @@
       style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
     <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
     <input id="reg-fid" type="text" autocomplete="off" placeholder="Google Drive Folder ID"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
+    <input id="reg-gemini" type="password" autocomplete="off" placeholder="AIza…"
       style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
       onkeydown="if(event.key==='Enter')window.doRegister()"/>
     <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px;font-size:11px;color:#475569;margin-bottom:14px;line-height:1.6">
-      🔒 CLIENT_ID &amp; FOLDER_ID 以 AES-256 加密儲存，伺服器無法讀取原始值。
+      🔒 CLIENT_ID、FOLDER_ID、Gemini API Key 均以 AES-256 加密儲存，伺服器無法讀取原始值。
     </div>
     <button onclick="window.doRegister()"
       style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
@@ -256,6 +259,7 @@
     <div class="user-badge">
       <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
       <span id="user-name"></span>
+      <button class="sign-out-btn" onclick="showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
       <button class="sign-out-btn" onclick="signOut()">登出</button>
     </div>
   </header>
@@ -450,7 +454,8 @@ window.doRegister=async function(){
   const pwd  =document.getElementById('reg-pwd').value;
   const cid  =document.getElementById('reg-cid').value.trim();
   const fid  =document.getElementById('reg-fid').value.trim();
-  if(!email||!pwd||!cid||!fid){setAuthMsg('請填寫所有欄位');return;}
+  const gkey =document.getElementById('reg-gemini').value.trim();
+  if(!email||!pwd||!cid||!fid||!gkey){setAuthMsg('請填寫所有欄位');return;}
   if(pwd.length<6){setAuthMsg('密碼至少 6 碼');return;}
   try{
     setAuthMsg('建立帳號中…','#94a3b8');
@@ -460,11 +465,13 @@ window.doRegister=async function(){
     await setDoc(doc(fbDb,'users',uid),{
       email, createdAt:serverTimestamp(),
       encClientId:await aesEncrypt(cid,key),
-      encFolderId:await aesEncrypt(fid,key)
+      encFolderId:await aesEncrypt(fid,key),
+      encGeminiKey:await aesEncrypt(gkey,key)
     });
     setAuthMsg('帳號建立成功！','#34d399');
     sessionStorage.setItem('mb_cid',cid);
     sessionStorage.setItem('mb_fid',fid);
+    sessionStorage.setItem('mb_gkey',gkey);
     setTimeout(()=>window._launchOAuth(cid,fid),600);
   }catch(e){
     setAuthMsg(e.code==='auth/email-already-in-use'?'Email 已被使用':'錯誤：'+e.message);
@@ -484,9 +491,11 @@ window.doLogin=async function(){
     const d=snap.data();
     const cid=await aesDecrypt(d.encClientId,key);
     const fid=await aesDecrypt(d.encFolderId,key);
+    const gkey=d.encGeminiKey?await aesDecrypt(d.encGeminiKey,key):'';
     setAuthMsg('登入成功！','#34d399');
     sessionStorage.setItem('mb_cid',cid);
     sessionStorage.setItem('mb_fid',fid);
+    sessionStorage.setItem('mb_gkey',gkey);
     setTimeout(()=>window._launchOAuth(cid,fid),400);
   }catch(e){
     setAuthMsg(e.code==='auth/invalid-credential'?'帳號或密碼錯誤':'錯誤：'+e.message);
@@ -505,6 +514,7 @@ window.doForgot=async function(){
 window.fbDoSignOut=async function(){
   sessionStorage.removeItem('mb_cid');
   sessionStorage.removeItem('mb_fid');
+  sessionStorage.removeItem('mb_gkey');
   try{await fbSignOut(fbAuth);}catch(e){}
 };
 
@@ -514,6 +524,29 @@ window.doCfgLogin=function(){
   if(!cid){setAuthMsg('請輸入 OAuth Client ID');return;}
   if(!fid){setAuthMsg('請輸入 Drive 資料夾 ID');return;}
   window._launchOAuth(cid,fid);
+};
+
+// Update credentials for logged-in user
+window.fbUpdateCredentials=async function(pwd,cid,fid,gkey){
+  const user=fbAuth.currentUser;
+  if(!user){return{ok:false,msg:'未登入'};}
+  try{
+    const key=await deriveKey(user.uid,pwd);
+    // Verify password by trying to decrypt existing record
+    const snap=await getDoc(doc(fbDb,'users',user.uid));
+    if(!snap.exists()){return{ok:false,msg:'找不到帳號資料'};}
+    try{await aesDecrypt(snap.data().encClientId,key);}
+    catch(e){return{ok:false,msg:'密碼錯誤'};}
+    const updates={};
+    if(cid) updates.encClientId=await aesEncrypt(cid,key);
+    if(fid) updates.encFolderId=await aesEncrypt(fid,key);
+    if(gkey) updates.encGeminiKey=await aesEncrypt(gkey,key);
+    await setDoc(doc(fbDb,'users',user.uid),updates,{merge:true});
+    if(cid) sessionStorage.setItem('mb_cid',cid);
+    if(fid) sessionStorage.setItem('mb_fid',fid);
+    if(gkey) sessionStorage.setItem('mb_gkey',gkey);
+    return{ok:true};
+  }catch(e){return{ok:false,msg:e.message};}
 };
 </script>
 
@@ -527,11 +560,13 @@ const PDF_PWD_KEY    = 'yuanta_pdf_pwd';
 
 // Runtime config — populated by _launchOAuth callback
 let CLIENT_ID = '', FOLDER_ID = '', accessToken = null;
+let GEMINI_API_KEY = sessionStorage.getItem('mb_gkey')||'';
 
 // Bridge: Firebase module calls window._launchOAuth(cid,fid)
 window._launchOAuth = function(cid, fid){
   CLIENT_ID = cid;
   FOLDER_ID = fid;
+  GEMINI_API_KEY = sessionStorage.getItem('mb_gkey')||'';
   document.getElementById('auth-screen').style.display='none';
   document.getElementById('loading-screen').style.display='flex';
   const tryInit=()=>{
@@ -1240,20 +1275,19 @@ async function syncKgiPortfolio(){
     const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
     const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
     syncSetState('kgi_parse','done');
-    syncSet('kgi_claude','Claude 解析持股資料','active');
-    const resp=await fetch('https://api.anthropic.com/v1/messages',{
+    syncSet('kgi_claude','Gemini 解析持股資料','active');
+    if(!GEMINI_API_KEY){syncSetState('kgi_claude','err');syncSet('kgi_json_err','找不到 Gemini API Key，請重新登入','err');syncHide();return;}
+    const geminiPrompt=`從以下國泰證券 AI 投資日報提取持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,6000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
+    const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',max_tokens:2000,
-        messages:[{role:'user',content:`從以下國泰證券 AI 投資日報提取持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,6000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`}]
-      })
+      body:JSON.stringify({contents:[{parts:[{text:geminiPrompt}]}]})
     });
     const ai=await resp.json();
-    const raw=ai.content?.[0]?.text||'';
+    const raw=ai.candidates?.[0]?.content?.parts?.[0]?.text||'';
     let newPortfolio=null;
     try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
-    catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 解析失敗，請手動上傳','err');console.error('Claude raw:',raw);syncHide();return;}
+    catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 解析失敗，請手動上傳','err');console.error('Gemini raw:',raw);syncHide();return;}
     syncSetState('kgi_claude','done');
     syncSet('kgi_upload','上傳 portfolio.json','active');
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
@@ -1264,6 +1298,84 @@ async function syncKgiPortfolio(){
     syncSet('kgi_done','國泰日報同步完成 ✓','done');
   }catch(err){syncSet('kgi_err','同步失敗：'+err.message,'err');console.error('KGI sync error',err);}
   syncHide();
+}
+</script>
+<!-- ── Credentials Update Modal ─────────────────────────── -->
+<div id="cred-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:28px 24px;width:340px;max-width:92vw;font-family:'Noto Sans TC',sans-serif">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:4px;font-family:'Space Mono',monospace">⚙️ 更新憑證</div>
+    <div style="color:#475569;font-size:11px;margin-bottom:18px">留空的欄位不會被修改</div>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="upd-cid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="upd-fid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
+    <input id="upd-gkey" type="password" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">登入密碼 <span style="color:#f87171">*</span></label>
+    <input id="upd-pwd" type="password" autocomplete="current-password" placeholder="必填，用於重新加密"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')doUpdateCreds()"/>
+
+    <div id="cred-msg" style="min-height:18px;font-size:12px;color:#f87171;margin-bottom:12px;text-align:center"></div>
+
+    <div style="display:flex;gap:10px">
+      <button onclick="doUpdateCreds()"
+        style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:700">
+        儲存
+      </button>
+      <button onclick="document.getElementById('cred-modal').style.display='none'"
+        style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">
+        取消
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showCredModal(){
+  // Pre-fill current values from sessionStorage as hints
+  document.getElementById('upd-cid').value='';
+  document.getElementById('upd-fid').value='';
+  document.getElementById('upd-gkey').value='';
+  document.getElementById('upd-pwd').value='';
+  document.getElementById('cred-msg').textContent='';
+  document.getElementById('cred-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('upd-cid').focus(),50);
+}
+
+async function doUpdateCreds(){
+  const pwd =document.getElementById('upd-pwd').value;
+  const cid =document.getElementById('upd-cid').value.trim();
+  const fid =document.getElementById('upd-fid').value.trim();
+  const gkey=document.getElementById('upd-gkey').value.trim();
+  const msg =document.getElementById('cred-msg');
+
+  if(!pwd){msg.textContent='請輸入登入密碼';return;}
+  if(!cid&&!fid&&!gkey){msg.textContent='至少填寫一個要更新的欄位';return;}
+
+  msg.style.color='#94a3b8';
+  msg.textContent='更新中…';
+
+  const r=await window.fbUpdateCredentials(pwd,cid,fid,gkey);
+  if(r.ok){
+    msg.style.color='#34d399';
+    msg.textContent='✓ 儲存成功！頁面將重新載入…';
+    // Apply runtime changes immediately
+    if(cid){CLIENT_ID=cid;}
+    if(fid){FOLDER_ID=fid;}
+    if(gkey){GEMINI_API_KEY=gkey;}
+    setTimeout(()=>{document.getElementById('cred-modal').style.display='none';},1800);
+  }else{
+    msg.style.color='#f87171';
+    msg.textContent='✗ '+r.msg;
+  }
 }
 </script>
 </body>
