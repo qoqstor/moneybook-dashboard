@@ -982,15 +982,15 @@ function extractYuantaData(text, filename){
   if(mMatch)month=mMatch[1];
   if(!month){const tm=text.match(/(\d{4})年\s*(\d{1,2})月/);if(tm)month=`${tm[1]}${tm[2].padStart(2,'0')}`}
 
-  // 市值 — 取所有符合值的最大值（避免抓到小計）
+  // 市值 — 取所有符合值中 >10000 的最大值（排除序號/小計）
   let marketValue=0;
   const mvAll=[...text.matchAll(/(?:總?市值|持股市值)[^\d\n]*([\d,]+)/g)];
-  if(mvAll.length){const vals=mvAll.map(m=>parseInt(m[1].replace(/,/g,'')));marketValue=Math.max(...vals);}
+  if(mvAll.length){const vals=mvAll.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length)marketValue=Math.max(...vals);}
 
-  // 成本 — 先找明確成本欄位，再 fallback 到市值-損益
+  // 成本 — 先找明確成本欄位 >10000，再 fallback 到市值-損益
   let cost=0;
   const costAll=[...text.matchAll(/(?:買進|持股|原始|參考)?成本[^\d\n（(]*([\d,]+)/g)];
-  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,'')));cost=Math.max(...vals.filter(v=>v>1000));}
+  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length)cost=Math.max(...vals);}
 
   // 損益 — 先找括號負數，再找一般格式（支援全形括號）
   let pnl=0;
@@ -1010,8 +1010,8 @@ function extractYuantaData(text, filename){
   }
   const holdings=Object.values(holdingsMap);
 
-  // 市值 fallback：從持股加總
-  if(!marketValue&&holdings.length)marketValue=holdings.reduce((s,h)=>s+h.value,0);
+  // 市值 fallback：從持股市值加總（>100 才算）
+  if(!marketValue&&holdings.length)marketValue=holdings.reduce((s,h)=>s+(h.value>100?h.value:0),0);
   // 成本 fallback 1：市值 - 損益
   if(!cost&&marketValue&&pnl!==0) cost=marketValue-pnl;
   // 成本 fallback 2：持股加總
@@ -1254,8 +1254,9 @@ async function syncKgiPortfolio(){
   syncItems={};syncShow();
   syncSet('kgi_scan','掃描國泰 AI 投資日報','active');
   try{
-    const q=encodeURIComponent('subject:【AI投資日報】');
-    const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=5`,
+    // newer_than:30d 確保抓最近郵件，orderBy 不支援但 Gmail 預設最新優先，用 newer_than 縮窄
+    const q=encodeURIComponent('subject:【AI投資日報】 newer_than:30d');
+    const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
       {headers:{Authorization:'Bearer '+accessToken}});
     const data=await res.json();
     const messages=data.messages||[];
@@ -1278,10 +1279,21 @@ async function syncKgiPortfolio(){
       return'';
     }
     function htmlToText(html){
+      // 用 DOMParser 解析，textContent 在所有環境均可用（innerText 需 layout）
       const doc=new DOMParser().parseFromString(html,'text/html');
-      // 移除 script/style
-      doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
-      return doc.body?.innerText||doc.body?.textContent||'';
+      doc.querySelectorAll('script,style,img,a[href]').forEach(el=>{
+        // 保留 a 標籤文字但移除連結
+        if(el.tagName==='A'){el.replaceWith(el.textContent);}
+        else el.remove();
+      });
+      // 將 <br>/<p>/<tr>/<div> 轉換為換行，再取 textContent
+      doc.querySelectorAll('br,p,tr,div').forEach(el=>{
+        el.after(doc.createTextNode('\n'));
+      });
+      return(doc.body?.textContent||'')
+        .replace(/\s{3,}/g,'\n')  // 多空白壓縮
+        .replace(/\n{3,}/g,'\n\n') // 多空行壓縮
+        .trim();
     }
     const rawHtml=getHtmlBody(detail.payload);
     const body=rawHtml?htmlToText(rawHtml):'';
@@ -1290,7 +1302,6 @@ async function syncKgiPortfolio(){
     syncSetState('kgi_parse','done');
     syncSet('kgi_claude','Gemini 解析持股資料','active');
     if(!GEMINI_API_KEY){syncSetState('kgi_claude','err');syncSet('kgi_json_err','找不到 Gemini API Key，請重新登入','err');syncHide();return;}
-    // 純文字通常 <3000 字，不需截斷；保留 12000 字以防萬一
     const geminiPrompt=`從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
     const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
       method:'POST',
