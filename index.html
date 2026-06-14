@@ -369,6 +369,7 @@
         <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
         <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
         <button onclick="showPasteJsonModal()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📋 貼入 JSON</button>
+        <button onclick="resetPortfolio()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🔄 重置並重新同步</button>
         <button onclick="setFixedCost()" style="background:#111128;border:1px solid #1e3a5f;color:#7dd3fc;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">💰 設定固定成本</button>
         <button onclick="cleanYuantaHistory()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🗑️ 清除錯誤資料</button>
         <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
@@ -1401,7 +1402,7 @@ function renderYuantaHistory(){
 // ── 共用 AI 呼叫（Gemini）────────────────────────────────────
 async function callAI(prompt){
   if(!GEMINI_API_KEY) throw new Error('缺少 Gemini API Key，請至「更新憑證」設定');
-  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
   });
@@ -1509,26 +1510,43 @@ function parseKgiHtml(htmlStr, mailDateStr){
   const volM=allText.match(/([\d,]+\.?\d*)億/);
   if(volM) volumeB=parseFloat(volM[1].replace(/,/g,''));
 
-  // ── 持股：font-size:22px td 為股票名稱 ──────────────────
+  // ── 持股：以 kchart 股票走勢圖 img 為起點，每張對應一檔 ──
   const holdings=[];
-  doc.querySelectorAll('td').forEach(td=>{
-    const style=td.getAttribute('style')||'';
-    if(!style.includes('22px')) return;
-    const name=td.textContent.trim();
-    if(!name||name.length>12||name.length<2) return;
-    const block=td.closest('table');
+  const seen=new Set();
+  doc.querySelectorAll('img').forEach(img=>{
+    const src=img.getAttribute('src')||'';
+    const m=src.match(/kchart\/\d+\/(\w+)\.png/);
+    if(!m) return;
+    const code=m[1];
+    if(seen.has(code)) return;
+    seen.add(code);
+
+    // 往上找包含此圖的最小有意義 block（包含股票名稱和價格）
+    // 逐層往上找，直到找到含有 22px td 的祖先 table
+    let block=img.closest('table');
+    while(block){
+      const hasPriceAndName=block.querySelector('td[style*="22px"]')&&block.querySelector('td[style*="40px"]');
+      if(hasPriceAndName) break;
+      block=block.parentElement?.closest('table');
+    }
     if(!block) return;
-    let code='';
-    block.querySelectorAll('img').forEach(img=>{
-      const m=(img.getAttribute('src')||'').match(/kchart\/\d+\/(\w+)\.png/);
-      if(m) code=m[1];
+
+    // 股票名稱
+    let name='';
+    block.querySelectorAll('td').forEach(td=>{
+      const s=td.getAttribute('style')||'';
+      if(s.includes('22px')){const t=td.textContent.trim();if(t&&t.length>=2&&t.length<=12)name=t;}
     });
-    if(!code) return;
+    if(!name) return;
+
+    // 價格
     let price=0;
     block.querySelectorAll('td').forEach(ptd=>{
       const ps=ptd.getAttribute('style')||'';
       if(ps.includes('40px')){const v=parseFloat(ptd.textContent.trim().replace(/,/g,''));if(v>0)price=v;}
     });
+
+    // 漲跌
     let chg=0,chgP=0;
     block.querySelectorAll('span').forEach(sp=>{
       const ss=sp.getAttribute('style')||'';
@@ -1537,13 +1555,17 @@ function parseKgiHtml(htmlStr, mailDateStr){
         if(cm){chg=parseFloat(cm[1]);chgP=parseFloat(cm[2]);}
       }
     });
+
+    // 成交量
     let vol=0;
     block.querySelectorAll('td').forEach(vtd=>{
       if(vtd.textContent.includes('成交量')){
         const vm=vtd.textContent.match(/：([\d,]+)/);
-        if(vm)vol=parseInt(vm[1].replace(/,/g,''));
+        if(vm) vol=parseInt(vm[1].replace(/,/g,''));
       }
     });
+
+    // signals
     const signals=[];
     block.querySelectorAll('td').forEach(std=>{
       if(std.textContent.includes('◉')){
@@ -1552,11 +1574,14 @@ function parseKgiHtml(htmlStr, mailDateStr){
         });
       }
     });
+
+    // report
     let report='';
     block.querySelectorAll('td').forEach(rtd=>{
       const rs=rtd.getAttribute('style')||'';
       if(rs.includes('#1C89C4')){const t=rtd.textContent.trim();if(t.length>10)report=t.slice(0,150);}
     });
+
     holdings.push({code,name,broker:'國泰證券',price,change:chg,change_pct:chgP,volume:vol,signals,events:[],report});
   });
   return{_meta:{updated:mailDate,account:'國泰證券'},market:{taiex,taiex_change:taiexChange,taiex_change_pct:taiexPct,volume_b:volumeB,date:mailDate},holdings};
@@ -1761,6 +1786,24 @@ async function setFixedCost(){
   localStorage.removeItem('yuanta_fixed_cost');
   renderYuantaHistory();
 }
+async function resetPortfolio(){
+  if(!confirm('刪除 Drive 上的 portfolio.json 並重新從 Gmail 同步？')) return;
+  syncShow();syncSet('reset','刪除舊 portfolio.json…','active');
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const id=list.files?.[0]?.id;
+    if(id){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${id}`,
+        {method:'DELETE',headers:{Authorization:'Bearer '+accessToken}});
+    }
+    syncSetState('reset','done');
+    portfolio=null;
+    syncSet('reset_sync','重新同步國泰日報…','active');
+    await syncKgiPortfolio();
+  }catch(e){syncSetState('reset','err');syncSet('reset_err','失敗：'+e.message,'err');}
+  syncHide();
+}
+
 function showPasteJsonModal(){
   document.getElementById('paste-json-input').value='';
   document.getElementById('paste-json-msg').textContent='';
@@ -1777,23 +1820,4 @@ async function doPasteJson(){
   try{
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
     const existId=list.files?.[0]?.id;
-    await driveUploadJson('portfolio.json',parsed,existId);
-    portfolio=parsed;renderPortfolio();renderDashboard();
-    msg.style.color='#34d399';msg.textContent='✓ 上傳成功！';
-    setTimeout(()=>document.getElementById('paste-json-modal').style.display='none',1200);
-  }catch(e){msg.style.color='#f87171';msg.textContent='上傳失敗：'+e.message;}
-}
-</script>
-
-<!-- ── Credentials Update Modal ─────────────────────────── -->
-<div id="cred-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:10001;align-items:center;justify-content:center">
-  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:28px 24px;width:340px;max-width:92vw;font-family:'Noto Sans TC',sans-serif">
-    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:4px;font-family:'Space Mono',monospace">⚙️ 更新憑證</div>
-    <div style="color:#475569;font-size:11px;margin-bottom:18px">留空的欄位不會被修改</div>
-
-    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
-    <input id="upd-cid" type="text" autocomplete="off" placeholder="（留空=不變）"
-      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
-
-    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
-    <input id="upd-fid" type
+    await driveUploadJson('portfolio.js
