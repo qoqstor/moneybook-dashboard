@@ -144,7 +144,7 @@
 <!-- DEV Banner -->
 <div id="dev-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#b45309,#d97706);color:#fff;font-family:'Space Mono',monospace;font-size:12px;padding:6px 16px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 12px #0008;">
   <span>⚠️ DEV 測試版 · 非正式版本，請勿分享此連結</span>
-  <span style="opacity:.7">v1.4.0-dev · 2026-06-13</span>
+  <span style="opacity:.7">v1.4.1-dev · 2026-06-14</span>
   <button onclick="document.getElementById('dev-banner').style.display='none'" style="background:none;border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">關閉</button>
 </div>
 <div style="height:36px"></div>
@@ -355,6 +355,7 @@
         <button onclick="startGmailSync()" style="background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📧 Gmail 自動同步</button>
         <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
         <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
+        <button onclick="showPasteJsonModal()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📋 貼入 JSON</button>
         <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
       </div>
       <!-- Drop zone -->
@@ -1312,7 +1313,14 @@ async function syncKgiPortfolio(){
     const raw=ai.candidates?.[0]?.content?.parts?.[0]?.text||'';
     let newPortfolio=null;
     try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
-    catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 解析失敗，請手動上傳','err');console.error('Gemini raw:',raw);syncHide();return;}
+    catch(e){
+      syncSetState('kgi_claude','err');
+      // 顯示前 200 字讓使用者看到問題
+      const preview=raw.slice(0,200)||'(空回應)';
+      syncSet('kgi_json_err','AI 解析失敗 · 回傳：'+preview,'err');
+      console.error('Gemini raw:',raw);
+      syncHide();return;
+    }
     syncSetState('kgi_claude','done');
     syncSet('kgi_upload','上傳 portfolio.json','active');
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
@@ -1325,6 +1333,44 @@ async function syncKgiPortfolio(){
   syncHide();
 }
 </script>
+<!-- ── Paste JSON Modal ─────────────────────────────────── -->
+<div id="paste-json-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:24px;width:92vw;max-width:480px;font-family:'Noto Sans TC',sans-serif">
+    <div style="font-weight:700;color:#94a3b8;font-family:'Space Mono',monospace;margin-bottom:8px">📋 貼入 portfolio.json</div>
+    <div style="color:#475569;font-size:11px;margin-bottom:12px">將 Claude 產出的 portfolio.json 內容貼入後儲存，自動上傳至 Drive。</div>
+    <textarea id="paste-json-input" rows="10" style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:11px;font-family:'Space Mono',monospace;resize:vertical;margin-bottom:10px" placeholder='{"_meta":...}'></textarea>
+    <div id="paste-json-msg" style="min-height:16px;font-size:12px;color:#f87171;margin-bottom:10px"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="doPasteJson()" style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">儲存並上傳</button>
+      <button onclick="document.getElementById('paste-json-modal').style.display='none'" style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">取消</button>
+    </div>
+  </div>
+</div>
+<script>
+function showPasteJsonModal(){
+  document.getElementById('paste-json-input').value='';
+  document.getElementById('paste-json-msg').textContent='';
+  document.getElementById('paste-json-modal').style.display='flex';
+}
+async function doPasteJson(){
+  const raw=document.getElementById('paste-json-input').value.trim();
+  const msg=document.getElementById('paste-json-msg');
+  if(!raw){msg.textContent='請貼入 JSON';return;}
+  let parsed;
+  try{parsed=JSON.parse(raw);}
+  catch(e){msg.textContent='JSON 格式錯誤：'+e.message;return;}
+  msg.style.color='#94a3b8';msg.textContent='上傳中…';
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('portfolio.json',parsed,existId);
+    portfolio=parsed;renderPortfolio();renderDashboard();
+    msg.style.color='#34d399';msg.textContent='✓ 上傳成功！';
+    setTimeout(()=>document.getElementById('paste-json-modal').style.display='none',1200);
+  }catch(e){msg.style.color='#f87171';msg.textContent='上傳失敗：'+e.message;}
+}
+</script>
+
 <!-- ── Credentials Update Modal ─────────────────────────── -->
 <div id="cred-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center">
   <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:28px 24px;width:340px;max-width:92vw;font-family:'Noto Sans TC',sans-serif">
