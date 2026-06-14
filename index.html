@@ -356,6 +356,7 @@
         <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
         <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
         <button onclick="showPasteJsonModal()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📋 貼入 JSON</button>
+        <button onclick="cleanYuantaHistory()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🗑️ 清除錯誤資料</button>
         <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
       </div>
       <!-- Drop zone -->
@@ -670,7 +671,7 @@ async function getOrCreateSubfolder(name, parentId){
 
 // ── Load All ──────────────────────────────────────────────
 async function loadAll(){
-  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','下載對帳單歷史','解析 & 建立圖表','同步國泰日報'];
+  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','下載對帳單歷史','解析 & 建立圖表','同步國泰日報','同步元大對帳單'];
   initSteps(steps);
 
   setStep(steps,0,'active');
@@ -732,6 +733,16 @@ async function loadAll(){
     }
   } else {
     setStep(steps,5,'done');
+  }
+
+  // ── Step 6：自動同步元大對帳單（有新月份才觸發）─────────
+  setStep(steps,6,'active');
+  try{
+    const newCount=await autoSyncYuantaSilent();
+    setStep(steps,6, newCount>0 ? 'done' : 'done');
+  }catch(e){
+    setStep(steps,6,'err');
+    console.warn('Auto Yuanta sync failed:',e);
   }
 
   setTimeout(()=>{
@@ -1291,7 +1302,85 @@ function renderYuantaHistory(){
   }).join('');
 }
 
-// ── 自動同步（載入時背景執行，失敗靜默）────────────────────
+// ── 自動同步元大對帳單（載入時背景執行）────────────────────
+async function autoSyncYuantaSilent(){
+  // 1. 掃描 Gmail 取得所有元大對帳單郵件
+  const q=encodeURIComponent(`from:${YUANTA_SENDER} subject:${YUANTA_SUBJECT} has:attachment`);
+  const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=50`,
+    {headers:{Authorization:'Bearer '+accessToken}});
+  const data=await res.json();
+  const messages=data.messages||[];
+  if(!messages.length) return 0;
+
+  // 2. 已同步月份
+  const syncedMonths=new Set(Object.keys(yuantaHistory?.months||{}));
+
+  // 3. 快速掃描每封信的 subject 取月份，找出未同步的
+  const toSync=[];
+  for(const msg of messages){
+    const meta=await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date`,
+      {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+    const subject=meta.payload?.headers?.find(h=>h.name==='Subject')?.value||'';
+    // 從 subject 或 Date header 取 YYYYMM
+    let monthKey='';
+    const sm=subject.match(/(\d{4})[\/\-]?(\d{2})/)||subject.match(/(\d{6})/);
+    if(sm) monthKey=sm[1].length===6?sm[1]:`${sm[1]}${sm[2]}`;
+    if(!monthKey){
+      const dateH=meta.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+      if(dateH){const d=new Date(dateH);monthKey=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;}
+    }
+    if(monthKey&&syncedMonths.has(monthKey)) continue; // 已同步，跳過
+    toSync.push({id:msg.id, monthKey});
+  }
+  if(!toSync.length) return 0;
+
+  // 4. 需要密碼才繼續 — 若 session 已有密碼直接用，否則彈窗詢問
+  const pwd=await askPwd();
+
+  let newCount=0;
+  for(const {id, monthKey} of toSync){
+    try{
+      const detail=await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
+        {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+
+      const pdfPart=findPdfPart(detail.payload?.parts||[]);
+      if(!pdfPart) continue;
+
+      const attRes=await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/attachments/${pdfPart.body.attachmentId}`,
+        {headers:{Authorization:'Bearer '+accessToken}});
+      const attData=await attRes.json();
+      const b64=attData.data.replace(/-/g,'+').replace(/_/g,'/');
+      const binary=atob(b64);
+      const buf=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++) buf[i]=binary.charCodeAt(i);
+      const arrayBuf=buf.buffer;
+
+      const text=await parsePdf(arrayBuf, pwd||undefined);
+      const pdfData=extractYuantaData(text, pdfPart.filename||`${monthKey}.pdf`);
+      if(monthKey&&!pdfData.month) pdfData.month=monthKey;
+
+      // 備份 PDF 到 Drive
+      try{
+        const subFolderId=await getOrCreateSubfolder('Yuanta_PDF',FOLDER_ID);
+        await driveUploadBinary(pdfPart.filename||`元大證券電子綜合月對帳單_${monthKey}.pdf`,arrayBuf,'application/pdf',subFolderId);
+      }catch(e){console.warn('Yuanta PDF backup failed',e);}
+
+      await mergeYuantaHistory([{...pdfData,filename:pdfPart.filename,parsedAt:new Date().toISOString()}]);
+      newCount++;
+      if(pdfData.month) syncedMonths.add(pdfData.month);
+    }catch(e){
+      console.warn('autoSyncYuanta item failed:',monthKey,e);
+    }
+  }
+
+  if(newCount>0) renderYuantaHistory();
+  return newCount;
+}
+
+
 async function autoSyncKgiSilent(){
   const q=encodeURIComponent('subject:【AI投資日報】 newer_than:2d');
   const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
@@ -1443,6 +1532,30 @@ async function syncKgiPortfolio(){
   </div>
 </div>
 <script>
+async function cleanYuantaHistory(){
+  if(!yuantaHistory?.months) return;
+  const before=Object.keys(yuantaHistory.months).length;
+  // 刪除 marketValue < 10000 的錯誤月份
+  for(const [k,v] of Object.entries(yuantaHistory.months)){
+    if(!v.marketValue || v.marketValue < 10000) delete yuantaHistory.months[k];
+  }
+  const after=Object.keys(yuantaHistory.months).length;
+  const removed=before-after;
+  if(removed===0){alert('沒有需要清除的錯誤資料');return;}
+  if(!confirm(`將清除 ${removed} 筆錯誤資料（市值<10000），確認？`)) return;
+  yuantaHistory._updated=new Date().toISOString();
+  syncShow();syncSet('clean','清除並儲存…','active');
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='yuanta_history.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('yuanta_history.json',yuantaHistory,existId);
+    syncSetState('clean','done');
+    syncSet('clean_done',`已清除 ${removed} 筆，剩 ${after} 筆`,'done');
+  }catch(e){syncSetState('clean','err');}
+  syncHide();
+  renderYuantaHistory();
+}
+
 function showPasteJsonModal(){
   document.getElementById('paste-json-input').value='';
   document.getElementById('paste-json-msg').textContent='';
