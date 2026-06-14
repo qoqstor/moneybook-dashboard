@@ -1819,4 +1819,101 @@ function showPasteJsonModal(){
 async function doPasteJson(){
   const raw=document.getElementById('paste-json-input').value.trim();
   const msg=document.getElementById('paste-json-msg');
-  if(!ra
+  if(!raw){msg.textContent='請貼入 JSON';return;}
+  let parsed;
+  try{parsed=JSON.parse(raw);}
+  catch(e){msg.textContent='JSON 格式錯誤：'+e.message;return;}
+  msg.style.color='#94a3b8';msg.textContent='上傳中…';
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('portfolio.json',parsed,existId);
+    portfolio=parsed;renderPortfolio();renderDashboard();
+    msg.style.color='#34d399';msg.textContent='✓ 上傳成功！';
+    setTimeout(()=>document.getElementById('paste-json-modal').style.display='none',1200);
+  }catch(e){msg.style.color='#f87171';msg.textContent='上傳失敗：'+e.message;}
+}
+</script>
+
+<!-- ── Credentials Update Modal ─────────────────────────── -->
+<div id="cred-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:10001;align-items:center;justify-content:center;padding:20px;box-sizing:border-box">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:28px 24px;width:340px;max-width:92vw;font-family:'Noto Sans TC',sans-serif">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:4px;font-family:'Space Mono',monospace">⚙️ 更新憑證</div>
+    <div style="color:#475569;font-size:11px;margin-bottom:18px">留空的欄位不會被修改</div>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="upd-cid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="upd-fid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
+    <input id="upd-gkey" type="password" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">登入密碼 <span style="color:#f87171">*</span></label>
+    <input id="upd-pwd" type="password" autocomplete="current-password" placeholder="必填，用於重新加密"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')doUpdateCreds()"/>
+
+    <div id="cred-msg" style="min-height:18px;font-size:12px;color:#f87171;margin-bottom:12px;text-align:center"></div>
+
+    <div style="display:flex;gap:10px">
+      <button onclick="doUpdateCreds()"
+        style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:700">
+        儲存
+      </button>
+      <button onclick="document.getElementById('cred-modal').style.display='none'"
+        style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">
+        取消
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showCredModal(){
+  document.getElementById('upd-cid').value='';
+  document.getElementById('upd-fid').value='';
+  document.getElementById('upd-gkey').value='';
+  document.getElementById('upd-pwd').value='';
+  document.getElementById('cred-msg').textContent='';
+  document.getElementById('cred-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('upd-gkey').focus(),50);
+}
+
+// 綁定所有按鈕（避免時序問題）
+async function doUpdateCreds(){
+  const pwd =document.getElementById('upd-pwd').value;
+  const cid =document.getElementById('upd-cid').value.trim();
+  const fid =document.getElementById('upd-fid').value.trim();
+  const gkey=document.getElementById('upd-gkey').value.trim();
+  const msg =document.getElementById('cred-msg');
+
+  if(!pwd){msg.textContent='請輸入登入密碼';return;}
+  if(!cid&&!fid&&!gkey){msg.textContent='至少填寫一個要更新的欄位';return;}
+  if(typeof window.fbUpdateCredentials!=='function'){
+    msg.style.color='#f87171';
+    msg.textContent='Firebase 尚未就緒，請稍後再試';return;
+  }
+
+  msg.style.color='#94a3b8';
+  msg.textContent='更新中…';
+
+  const r=await window.fbUpdateCredentials(pwd,cid,fid,gkey);
+  if(r.ok){
+    msg.style.color='#34d399';
+    msg.textContent='✓ 儲存成功！';
+    if(cid){CLIENT_ID=cid;}
+    if(fid){FOLDER_ID=fid;}
+    if(gkey){GEMINI_API_KEY=gkey;}
+    setTimeout(()=>{document.getElementById('cred-modal').style.display='none';},1800);
+  }else{
+    msg.style.color='#f87171';
+    msg.textContent='✗ '+r.msg;
+  }
+}
+</script>
+</body>
