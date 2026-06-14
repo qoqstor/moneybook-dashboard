@@ -670,7 +670,7 @@ async function getOrCreateSubfolder(name, parentId){
 
 // ── Load All ──────────────────────────────────────────────
 async function loadAll(){
-  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','下載對帳單歷史','解析 & 建立圖表'];
+  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','下載對帳單歷史','解析 & 建立圖表','同步國泰日報'];
   initSteps(steps);
 
   setStep(steps,0,'active');
@@ -717,6 +717,23 @@ async function loadAll(){
   }
   renderDashboard();
   setStep(steps,4,'done');
+
+  // ── Step 5：自動同步國泰日報（今日未更新才觸發）────────
+  const today=new Date().toISOString().slice(0,10);
+  const pfUpdated=portfolio?._meta?.updated||'';
+  if(pfUpdated!==today){
+    setStep(steps,5,'active');
+    try{
+      await autoSyncKgiSilent();
+      setStep(steps,5,'done');
+    }catch(e){
+      setStep(steps,5,'err');
+      console.warn('Auto KGI sync failed:',e);
+    }
+  } else {
+    setStep(steps,5,'done');
+  }
+
   setTimeout(()=>{
     document.getElementById('loading-screen').style.display='none';
     document.getElementById('dashboard').style.display='block';
@@ -977,27 +994,47 @@ async function parsePdf(arrayBuffer, password){
 }
 
 function extractYuantaData(text, filename){
+  console.log('[YuantaPDF] raw text (800):\n', text.slice(0,800));
   // 月份
   let month='';
   const mMatch=filename.match(/(\d{6})/);
   if(mMatch)month=mMatch[1];
   if(!month){const tm=text.match(/(\d{4})年\s*(\d{1,2})月/);if(tm)month=`${tm[1]}${tm[2].padStart(2,'0')}`}
 
-  // 市值 — 取所有符合值中 >10000 的最大值（排除序號/小計）
+  // 市值 — 支援「市值 375,389」和「375,389 市值」兩種方向，>10000
   let marketValue=0;
-  const mvAll=[...text.matchAll(/(?:總?市值|持股市值)[^\d\n]*([\d,]+)/g)];
-  if(mvAll.length){const vals=mvAll.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length)marketValue=Math.max(...vals);}
+  const mvPatterns=[
+    /(?:總?市值|持股市值|資產總額|股票市值)[^\d\n]{0,10}([\d,]+)/g,
+    /([\d,]+)[^\d\n]{0,6}(?:總?市值|持股市值)/g
+  ];
+  for(const pat of mvPatterns){
+    const all=[...text.matchAll(pat)];
+    if(all.length){const vals=all.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length){marketValue=Math.max(...vals);break;}}
+  }
 
-  // 成本 — 先找明確成本欄位 >10000，再 fallback 到市值-損益
+  // 成本 — 支援「成本 316,477」和「316,477 成本」，>10000
   let cost=0;
-  const costAll=[...text.matchAll(/(?:買進|持股|原始|參考)?成本[^\d\n（(]*([\d,]+)/g)];
-  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length)cost=Math.max(...vals);}
+  const costPatterns=[
+    /(?:買進|持股|原始|參考|投資)?成本[^\d\n]{0,10}([\d,]+)/g,
+    /([\d,]+)[^\d\n]{0,6}(?:買進|持股|原始|參考)?成本/g
+  ];
+  for(const pat of costPatterns){
+    const all=[...text.matchAll(pat)];
+    if(all.length){const vals=all.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length){cost=Math.max(...vals);break;}}
+  }
 
-  // 損益 — 先找括號負數，再找一般格式（支援全形括號）
+  // 損益 — 支援括號負數（全/半形）、前置負號、正數
   let pnl=0;
-  const pnlNeg=text.match(/(?:未實現|評估)?損益[^\d\n(（]*[（(]([\d,]+)[）)]/);
-  if(pnlNeg){pnl=-parseInt(pnlNeg[1].replace(/,/g,''));}
-  else{const pnlPos=text.match(/(?:未實現|評估)?損益[^\d\n-]*(-?[\d,]+)/);if(pnlPos)pnl=parseInt(pnlPos[1].replace(/,/g,''));}
+  const pnlM=
+    text.match(/(?:未實現|評估)?損益[^\d\n(（]{0,6}[（(]([\d,]+)[）)]/) ||  // 負：(58,912)
+    text.match(/([\d,]+)[^\d\n]{0,6}(?:未實現)?損益[^\d\n]{0,6}[（(]/) ||   // 負：數字在前
+    text.match(/(?:未實現|評估)?損益[^\d\n]{0,6}(-[\d,]+)/) ||              // 負號
+    text.match(/(?:未實現|評估)?損益[^\d\n]{0,6}([\d,]+)/);                 // 正數
+  if(pnlM){
+    const raw=pnlM[1].replace(/,/g,'');
+    // 判斷是否為括號負數（原始 match 含括號）
+    pnl=pnlM[0].includes('(')||pnlM[0].includes('（') ? -parseInt(raw) : parseInt(raw);
+  }
 
   // Holdings — 以股票代號去重（修正大魯閣等重複顯示問題）
   const holdingsMap={};
@@ -1018,6 +1055,7 @@ function extractYuantaData(text, filename){
   // 成本 fallback 2：持股加總
   if(!cost&&holdings.length) cost=holdings.reduce((s,h)=>s+h.value,0);
 
+  console.log('[YuantaPDF] parsed:', {month, marketValue, cost, pnl, holdings: holdings.length});
   return{month,marketValue,cost,pnl,holdings,rawTextLength:text.length};
 }
 
@@ -1057,6 +1095,9 @@ async function handlePdfFiles(fileList){
       const buf=await file.arrayBuffer();
       const text=await parsePdf(buf, pwd||undefined);
       const data=extractYuantaData(text, file.name);
+
+      // DEBUG：顯示 PDF 原始文字前 600 字（確認 regex 目標）
+      if(txtEl) txtEl.title='RAW TEXT:\n'+text.slice(0,600);
 
       if(statusEl){statusEl.className='status ok';statusEl.textContent='✓'}
       if(txtEl)txtEl.textContent=`${data.month||'?'} · ${data.holdings.length} 檔持股`;
@@ -1250,7 +1291,62 @@ function renderYuantaHistory(){
   }).join('');
 }
 
-// ── 國泰 AI 投資日報 → portfolio.json 自動同步 ────────────
+// ── 自動同步（載入時背景執行，失敗靜默）────────────────────
+async function autoSyncKgiSilent(){
+  const q=encodeURIComponent('subject:【AI投資日報】 newer_than:2d');
+  const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
+    {headers:{Authorization:'Bearer '+accessToken}});
+  const data=await res.json();
+  const messages=data.messages||[];
+  if(!messages.length) return; // 近2天無新信，跳過
+
+  const detail=await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
+    {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+
+  // 取郵件日期，若 portfolio 已是當天則跳過
+  const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+  const mailDate=dateHeader?new Date(dateHeader).toISOString().slice(0,10):'';
+  if(mailDate&&portfolio?._meta?.updated===mailDate) return;
+
+  function getHtmlBody(payload){
+    if(!payload)return'';
+    if(payload.mimeType==='text/html'&&payload.body?.data)
+      return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
+    if(payload.parts){for(const p of payload.parts){const b=getHtmlBody(p);if(b)return b;}}
+    return'';
+  }
+  function htmlToText(html){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+    doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
+    return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  }
+  const body=htmlToText(getHtmlBody(detail.payload));
+  if(!body||!GEMINI_API_KEY) return;
+
+  const displayDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+  const prompt=`從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${displayDate}\n---\n${body.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
+
+  const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+  });
+  const ai=await resp.json();
+  const raw=ai.candidates?.[0]?.content?.parts?.[0]?.text||'';
+  let parsed;
+  try{parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+  catch(e){console.warn('autoSyncKgi parse fail:',raw.slice(0,200));return;}
+
+  const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+  const existId=list.files?.[0]?.id;
+  await driveUploadJson('portfolio.json',parsed,existId);
+  portfolio=parsed;
+  renderPortfolio();
+  renderDashboard();
+}
+
+
 async function syncKgiPortfolio(){
   syncItems={};syncShow();
   syncSet('kgi_scan','掃描國泰 AI 投資日報','active');
