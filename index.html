@@ -167,8 +167,12 @@
       style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
     <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">密碼</label>
     <input id="login-pwd" type="password" autocomplete="current-password" placeholder="••••••••"
-      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:14px;font-family:'Space Mono',monospace"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"
       onkeydown="if(event.key==='Enter')window.doLogin()"/>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b;margin-bottom:14px;cursor:pointer">
+      <input type="checkbox" id="login-remember" style="width:14px;height:14px;accent-color:#6366f1"/>
+      記住帳號密碼（存於本裝置）
+    </label>
     <button onclick="window.doLogin()"
       style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
       登入
@@ -365,6 +369,7 @@
         <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
         <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
         <button onclick="showPasteJsonModal()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📋 貼入 JSON</button>
+        <button onclick="setFixedCost()" style="background:#111128;border:1px solid #1e3a5f;color:#7dd3fc;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">💰 設定固定成本</button>
         <button onclick="cleanYuantaHistory()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🗑️ 清除錯誤資料</button>
         <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
       </div>
@@ -492,6 +497,7 @@ window.doRegister=async function(){
 window.doLogin=async function(){
   const email=document.getElementById('login-email').value.trim();
   const pwd  =document.getElementById('login-pwd').value;
+  const remember=document.getElementById('login-remember').checked;
   if(!email||!pwd){setAuthMsg('請輸入帳號密碼');return;}
   try{
     setAuthMsg('登入中…','#94a3b8');
@@ -503,6 +509,13 @@ window.doLogin=async function(){
     const cid=await aesDecrypt(d.encClientId,key);
     const fid=await aesDecrypt(d.encFolderId,key);
     const gkey=d.encGeminiKey?await aesDecrypt(d.encGeminiKey,key):'';
+    if(remember){
+      localStorage.setItem('mb_saved_email',email);
+      localStorage.setItem('mb_saved_pwd',pwd);
+    } else {
+      localStorage.removeItem('mb_saved_email');
+      localStorage.removeItem('mb_saved_pwd');
+    }
     setAuthMsg('登入成功！','#34d399');
     sessionStorage.setItem('mb_cid',cid);
     sessionStorage.setItem('mb_fid',fid);
@@ -536,6 +549,24 @@ window.doCfgLogin=function(){
   if(!fid){setAuthMsg('請輸入 Drive 資料夾 ID');return;}
   window._launchOAuth(cid,fid);
 };
+
+// 自動填入已儲存帳密
+(function(){
+  const se=localStorage.getItem('mb_saved_email');
+  const sp=localStorage.getItem('mb_saved_pwd');
+  if(se&&sp){
+    const tryFill=()=>{
+      const emailEl=document.getElementById('login-email');
+      const pwdEl=document.getElementById('login-pwd');
+      const remEl=document.getElementById('login-remember');
+      if(emailEl&&pwdEl){
+        emailEl.value=se;pwdEl.value=sp;
+        if(remEl)remEl.checked=true;
+      } else setTimeout(tryFill,100);
+    };
+    tryFill();
+  }
+})();
 
 // Update credentials for logged-in user
 window.fbUpdateCredentials=async function(pwd,cid,fid,gkey){
@@ -1327,11 +1358,14 @@ function renderYuantaHistory(){
     el.innerHTML='<div class="no-portfolio" style="margin-top:16px">尚無對帳單資料 · 點擊上方按鈕同步或匯入 PDF</div>';
     return;
   }
+  // 固定成本覆蓋（使用者手動設定）
+  const fixedCost=parseInt(localStorage.getItem('yuanta_fixed_cost')||'0');
   const months=Object.entries(yuantaHistory.months).sort((a,b)=>b[0].localeCompare(a[0]));
   el.innerHTML=months.map(([key,d])=>{
     const yr=key.slice(0,4),mo=key.slice(4,6);
+    const cost=fixedCost||d.cost||0;
     const pnl = (d.pnl!==0 && d.pnl!=null) ? d.pnl
-               : (d.marketValue>10000 && d.cost>10000) ? d.marketValue-d.cost : 0;
+               : (d.marketValue>10000 && cost>10000) ? d.marketValue-cost : 0;
     const pnlColor=pnl>0?'#f87171':pnl<0?'#34d399':'#94a3b8';
     const holdingsHtml=d.holdings?.length?
       `<div class="yuanta-holdings">${d.holdings.slice(0,6).map(h=>`
@@ -1348,7 +1382,7 @@ function renderYuantaHistory(){
       </div>
       <div class="yuanta-stats">
         <div class="yuanta-stat"><div class="yuanta-stat-label">市值</div><div class="yuanta-stat-val" style="color:#7dd3fc;font-size:14px">${d.marketValue?fmtK(d.marketValue):'—'}</div></div>
-        <div class="yuanta-stat"><div class="yuanta-stat-label">成本</div><div class="yuanta-stat-val" style="color:#94a3b8;font-size:14px">${d.cost?fmtK(d.cost):'—'}</div></div>
+        <div class="yuanta-stat"><div class="yuanta-stat-label">成本${fixedCost?'🔒':''}</div><div class="yuanta-stat-val" style="color:#94a3b8;font-size:14px">${cost?fmtK(cost):'—'}</div></div>
         <div class="yuanta-stat"><div class="yuanta-stat-label">損益</div><div class="yuanta-stat-val" style="color:${pnlColor};font-size:14px">${pnl?(pnl>0?'+':'')+fmtK(pnl):'—'}</div></div>
       </div>
       ${holdingsHtml}
@@ -1356,31 +1390,16 @@ function renderYuantaHistory(){
   }).join('');
 }
 
-// ── 共用 AI 呼叫（優先 Claude，fallback Gemini）────────────
+// ── 共用 AI 呼叫（Gemini）────────────────────────────────────
 async function callAI(prompt){
-  // 先嘗試 Claude API（artifact 環境可用，不需 key）
-  try{
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({
-        model:'claude-sonnet-4-6',
-        max_tokens:1000,
-        messages:[{role:'user',content:prompt}]
-      })
-    });
-    const d=await r.json();
-    const text=d.content?.find(c=>c.type==='text')?.text||'';
-    if(text) return text;
-  }catch(e){console.warn('Claude API failed, trying Gemini:',e);}
-
-  // Fallback：Gemini
-  if(!GEMINI_API_KEY) throw new Error('No AI API available');
+  if(!GEMINI_API_KEY) throw new Error('缺少 Gemini API Key，請至「更新憑證」設定');
   const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
     method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
   });
+  if(!r.ok) throw new Error(`Gemini HTTP ${r.status}`);
   const d=await r.json();
+  if(d.error) throw new Error(d.error.message||'Gemini API 錯誤');
   return d.candidates?.[0]?.content?.parts?.[0]?.text||'';
 }
 
@@ -1463,7 +1482,11 @@ async function autoSyncYuantaSilent(){
 }
 
 
-// ── 從國泰 HTML 直接解析 portfolio（不需 AI）────────────────
+function kgiPrompt(bodyText, displayDate){
+  return `從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${displayDate}\n---\n${bodyText.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
+}
+
+
 function parseKgiHtml(htmlStr, mailDateStr){
   const doc=new DOMParser().parseFromString(htmlStr,'text/html');
   const mailDate=mailDateStr?new Date(mailDateStr).toISOString().slice(0,10):'';
@@ -1569,25 +1592,34 @@ async function autoSyncKgiSilent(){
   const mailDate=dateHeader?new Date(dateHeader).toISOString().slice(0,10):'';
   if(mailDate&&portfolio?._meta?.updated===mailDate) return;
 
-  function getHtmlBody(payload){
+  function getHtmlBodyA(payload){
     if(!payload)return'';
     if(payload.mimeType==='text/html'&&payload.body?.data)
       return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
-    if(payload.parts){for(const p of payload.parts){const b=getHtmlBody(p);if(b)return b;}}
+    if(payload.parts){for(const p of payload.parts){const b=getHtmlBodyA(p);if(b)return b;}}
     return'';
   }
-  const htmlStr=getHtmlBody(detail.payload);
-  if(!htmlStr) return;
+  function htmlToTextA(html){
+    const doc=new DOMParser().parseFromString(html,'text/html');
+    doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+    doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
+    return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+  }
+  const body=htmlToTextA(getHtmlBodyA(detail.payload));
+  if(!body||!GEMINI_API_KEY) return;
 
-  const parsed=parseKgiHtml(htmlStr, dateHeader);
-  if(!parsed.holdings.length&&!parsed.market.taiex) return; // 解析失敗
+  const displayDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+  const prompt=kgiPrompt(body, displayDate);
+  let raw='';
+  try{raw=await callAI(prompt);}catch(e){console.warn('autoSyncKgi failed:',e);return;}
+  let parsed;
+  try{parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+  catch(e){console.warn('autoSyncKgi parse fail:',raw.slice(0,200));return;}
 
   const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
   const existId=list.files?.[0]?.id;
   await driveUploadJson('portfolio.json',parsed,existId);
-  portfolio=parsed;
-  renderPortfolio();
-  renderDashboard();
+  portfolio=parsed;renderPortfolio();renderDashboard();
 }
 
 
@@ -1624,23 +1656,37 @@ async function syncKgiPortfolio(){
       if(payload.parts){for(const p of payload.parts){const b=getHtmlBodyM(p);if(b)return b;}}
       return'';
     }
+    function htmlToTextM(html){
+      const doc=new DOMParser().parseFromString(html,'text/html');
+      doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+      doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
+      return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+    }
     const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
-    const htmlStr=getHtmlBodyM(detail.payload);
-    if(!htmlStr){syncSetState('kgi_parse','err');syncSet('kgi_err2','找不到郵件內容','err');syncHide();return;}
-    const newPortfolio=parseKgiHtml(htmlStr, dateHeader);
-    if(!newPortfolio.market.taiex){
-      syncSetState('kgi_parse','err');
-      syncSet('kgi_err2','解析失敗：找不到大盤數字','err');
+    const rawHtml=getHtmlBodyM(detail.payload);
+    const body=rawHtml?htmlToTextM(rawHtml):'';
+    const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+    syncSetState('kgi_parse','done');
+    syncSet('kgi_claude','Gemini 解析持股資料','active');
+    if(!GEMINI_API_KEY){syncSetState('kgi_claude','err');syncSet('kgi_json_err','缺少 Gemini API Key，請至「更新憑證」設定','err');syncHide();return;}
+    let raw='';
+    try{raw=await callAI(kgiPrompt(body,mailDate));}
+    catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 呼叫失敗：'+e.message,'err');syncHide();return;}
+    let newPortfolio=null;
+    try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+    catch(e){
+      syncSetState('kgi_claude','err');
+      syncSet('kgi_json_err','解析失敗：'+(raw.slice(0,100)||'(空回應)'),'err');
       syncHide();return;
     }
-    syncSetState('kgi_parse','done');
+    syncSetState('kgi_claude','done');
     syncSet('kgi_upload','上傳 portfolio.json','active');
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
     const existId=list.files?.[0]?.id;
     await driveUploadJson('portfolio.json',newPortfolio,existId);
     syncSetState('kgi_upload','done');
     portfolio=newPortfolio;renderPortfolio();renderDashboard();
-    syncSet('kgi_done',`國泰日報同步完成 ✓ (${newPortfolio._meta.updated})`,'done');
+    syncSet('kgi_done',`同步完成 ✓ (${newPortfolio._meta?.updated||mailDate})`,'done');
   }catch(err){syncSet('kgi_err','同步失敗：'+err.message,'err');console.error('KGI sync error',err);}
   syncHide();
 }
@@ -1683,6 +1729,16 @@ async function cleanYuantaHistory(){
   renderYuantaHistory();
 }
 
+function setFixedCost(){
+  const cur=localStorage.getItem('yuanta_fixed_cost')||'';
+  const v=prompt(`設定元大固定成本（留空清除）\n目前：${cur?'NT$'+parseInt(cur).toLocaleString():'未設定'}`,cur);
+  if(v===null) return;
+  const n=parseInt(v.replace(/,/g,''));
+  if(v.trim()===''){ localStorage.removeItem('yuanta_fixed_cost'); alert('已清除固定成本'); }
+  else if(isNaN(n)||n<0){ alert('請輸入有效數字'); return; }
+  else { localStorage.setItem('yuanta_fixed_cost',String(n)); alert(`已設定固定成本 NT$${n.toLocaleString()}`); }
+  renderYuantaHistory();
+}
 function showPasteJsonModal(){
   document.getElementById('paste-json-input').value='';
   document.getElementById('paste-json-msg').textContent='';
@@ -1734,56 +1790,4 @@ async function doPasteJson(){
 
     <div style="display:flex;gap:10px">
       <button onclick="doUpdateCreds()"
-        style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:700">
-        儲存
-      </button>
-      <button onclick="document.getElementById('cred-modal').style.display='none'"
-        style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">
-        取消
-      </button>
-    </div>
-  </div>
-</div>
-
-<script>
-function showCredModal(){
-  // Pre-fill current values from sessionStorage as hints
-  document.getElementById('upd-cid').value='';
-  document.getElementById('upd-fid').value='';
-  document.getElementById('upd-gkey').value='';
-  document.getElementById('upd-pwd').value='';
-  document.getElementById('cred-msg').textContent='';
-  document.getElementById('cred-modal').style.display='flex';
-  setTimeout(()=>document.getElementById('upd-cid').focus(),50);
-}
-
-async function doUpdateCreds(){
-  const pwd =document.getElementById('upd-pwd').value;
-  const cid =document.getElementById('upd-cid').value.trim();
-  const fid =document.getElementById('upd-fid').value.trim();
-  const gkey=document.getElementById('upd-gkey').value.trim();
-  const msg =document.getElementById('cred-msg');
-
-  if(!pwd){msg.textContent='請輸入登入密碼';return;}
-  if(!cid&&!fid&&!gkey){msg.textContent='至少填寫一個要更新的欄位';return;}
-
-  msg.style.color='#94a3b8';
-  msg.textContent='更新中…';
-
-  const r=await window.fbUpdateCredentials(pwd,cid,fid,gkey);
-  if(r.ok){
-    msg.style.color='#34d399';
-    msg.textContent='✓ 儲存成功！頁面將重新載入…';
-    // Apply runtime changes immediately
-    if(cid){CLIENT_ID=cid;}
-    if(fid){FOLDER_ID=fid;}
-    if(gkey){GEMINI_API_KEY=gkey;}
-    setTimeout(()=>{document.getElementById('cred-modal').style.display='none';},1800);
-  }else{
-    msg.style.color='#f87171';
-    msg.textContent='✗ '+r.msg;
-  }
-}
-</script>
-</body>
-</html>
+        style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:700"
