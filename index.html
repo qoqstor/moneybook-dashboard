@@ -145,7 +145,10 @@
 <div id="dev-banner" style="position:fixed;top:0;left:0;right:0;z-index:9999;background:linear-gradient(90deg,#b45309,#d97706);color:#fff;font-family:'Space Mono',monospace;font-size:12px;padding:6px 16px;display:flex;justify-content:space-between;align-items:center;box-shadow:0 2px 12px #0008;">
   <span>⚠️ DEV 測試版 · 非正式版本，請勿分享此連結</span>
   <span style="opacity:.7">v1.4.1-dev · 2026-06-14</span>
-  <button onclick="document.getElementById('dev-banner').style.display='none'" style="background:none;border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">關閉</button>
+  <div style="display:flex;gap:6px">
+    <button id="dev-cred-btn" style="background:rgba(0,0,0,.3);border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:'Space Mono',monospace">⚙️ 更新憑證</button>
+    <button onclick="document.getElementById('dev-banner').style.display='none'" style="background:none;border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">關閉</button>
+  </div>
 </div>
 <div style="height:36px"></div>
 <div class="grid-bg"></div>
@@ -1820,8 +1823,4 @@ async function doPasteJson(){
   let parsed;
   try{parsed=JSON.parse(raw);}
   catch(e){msg.textContent='JSON 格式錯誤：'+e.message;return;}
-  msg.style.color='#94a3b8';msg.textContent='上傳中…';
-  try{
-    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
-    const existId=list.files?.[0]?.id;
-    await driveUploadJson('port
+  msg.style.color='#94a3b8';msg
