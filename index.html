@@ -264,6 +264,15 @@
     </div>
   </header>
 
+  <!-- 盤前資訊橫幅 -->
+  <div id="market-ticker" style="background:#0d0d1f;border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:20px;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-family:'Space Mono',monospace">📡 台股即時</div>
+      <div id="ticker-time" style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace"></div>
+    </div>
+    <div id="ticker-content" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px"></div>
+  </div>
+
   <div class="stat-grid">
     <div class="stat-card" style="border-color:#6366f1">
       <div class="slabel">最新月消費</div>
@@ -825,6 +834,7 @@ function renderDashboard(){
   renderPortfolio();
   renderYuantaHistory();
   if(d.byYear)renderInsight(d);
+  loadMarketTicker();
 }
 
 function renderTrend(d){
@@ -932,7 +942,47 @@ function renderInsight(d){
     <div class="insight-row"><span style="font-size:18px">🏆</span><p>${lastY} 年最大消費類別：<strong>${topCat?.[0]||'—'}</strong>（${fmtN(Math.round(topCat?.[1]||0))}）。</p></div>`;
 }
 
-// ── Tab Switch ────────────────────────────────────────────
+// ── 盤前資訊（Yahoo Finance API）────────────────────────────
+async function loadMarketTicker(){
+  // 抓加權指數(^TWII)、持股代號
+  const codes=['^TWII'];
+  if(portfolio?.holdings) portfolio.holdings.slice(0,6).forEach(h=>{
+    // Yahoo Finance TW 股票格式：代號.TW 或 .TWO
+    codes.push(h.code+'.TW');
+  });
+  const symbols=codes.join(',');
+  try{
+    const url=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketTime&lang=zh-TW&region=TW`;
+    const r=await fetch(url);
+    const d=await r.json();
+    const quotes=d.quoteResponse?.result||[];
+    if(!quotes.length) return;
+
+    const tickerEl=document.getElementById('ticker-content');
+    const timeEl=document.getElementById('ticker-time');
+    const ticker=document.getElementById('market-ticker');
+
+    const items=quotes.map(q=>{
+      const up=q.regularMarketChange>=0;
+      const cls=up?'#f87171':'#34d399';
+      const arrow=up?'▲':'▼';
+      const name=q.shortName||q.symbol;
+      const time=q.regularMarketTime?new Date(q.regularMarketTime*1000).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}):'';
+      return`<div style="display:flex;flex-direction:column;gap:2px;min-width:80px">
+        <div style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace">${name.slice(0,8)}</div>
+        <div style="font-size:16px;font-weight:900;color:${cls};font-family:'Space Mono',monospace">${q.regularMarketPrice?.toLocaleString()}</div>
+        <div style="font-size:11px;color:${cls}">${arrow}${Math.abs(q.regularMarketChange||0).toFixed(2)} (${Math.abs(q.regularMarketChangePercent||0).toFixed(2)}%)</div>
+      </div>`;
+    });
+
+    tickerEl.innerHTML=items.join('<div style="width:1px;background:var(--border);align-self:stretch"></div>');
+    const lastTime=quotes[0]?.regularMarketTime;
+    if(lastTime) timeEl.textContent='更新 '+new Date(lastTime*1000).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+    ticker.style.display='block';
+  }catch(e){console.warn('Market ticker failed:',e);}
+}
+
+
 function switchTab(name,e){
   document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
   document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
@@ -1064,7 +1114,9 @@ function extractYuantaData(text, filename){
   // 成本 fallback 1：市值 - 損益
   if(!cost&&marketValue&&pnl!==0) cost=marketValue-pnl;
   // 成本 fallback 2：持股加總
-  if(!cost&&holdings.length) cost=holdings.reduce((s,h)=>s+h.value,0);
+  if(!cost&&holdings.length) cost=holdings.reduce((s,h)=>s+(h.value>100?h.value:0),0);
+  // 損益 fallback：市值 - 成本（成本 > 10000 才可信）
+  if(!pnl&&marketValue>10000&&cost>10000) pnl=marketValue-cost;
 
   console.log('[YuantaPDF] parsed:', {month, marketValue, cost, pnl, holdings: holdings.length});
   return{month,marketValue,cost,pnl,holdings,rawTextLength:text.length};
@@ -1278,7 +1330,9 @@ function renderYuantaHistory(){
   const months=Object.entries(yuantaHistory.months).sort((a,b)=>b[0].localeCompare(a[0]));
   el.innerHTML=months.map(([key,d])=>{
     const yr=key.slice(0,4),mo=key.slice(4,6);
-    const pnlColor=d.pnl>0?'#f87171':d.pnl<0?'#34d399':'#94a3b8';
+    const pnl = (d.pnl!==0 && d.pnl!=null) ? d.pnl
+               : (d.marketValue>10000 && d.cost>10000) ? d.marketValue-d.cost : 0;
+    const pnlColor=pnl>0?'#f87171':pnl<0?'#34d399':'#94a3b8';
     const holdingsHtml=d.holdings?.length?
       `<div class="yuanta-holdings">${d.holdings.slice(0,6).map(h=>`
         <div class="yuanta-holding-row">
@@ -1295,14 +1349,42 @@ function renderYuantaHistory(){
       <div class="yuanta-stats">
         <div class="yuanta-stat"><div class="yuanta-stat-label">市值</div><div class="yuanta-stat-val" style="color:#7dd3fc;font-size:14px">${d.marketValue?fmtK(d.marketValue):'—'}</div></div>
         <div class="yuanta-stat"><div class="yuanta-stat-label">成本</div><div class="yuanta-stat-val" style="color:#94a3b8;font-size:14px">${d.cost?fmtK(d.cost):'—'}</div></div>
-        <div class="yuanta-stat"><div class="yuanta-stat-label">損益</div><div class="yuanta-stat-val" style="color:${pnlColor};font-size:14px">${d.pnl?(d.pnl>0?'+':'')+fmtK(d.pnl):'—'}</div></div>
+        <div class="yuanta-stat"><div class="yuanta-stat-label">損益</div><div class="yuanta-stat-val" style="color:${pnlColor};font-size:14px">${pnl?(pnl>0?'+':'')+fmtK(pnl):'—'}</div></div>
       </div>
       ${holdingsHtml}
     </div>`;
   }).join('');
 }
 
-// ── 自動同步元大對帳單（載入時背景執行）────────────────────
+// ── 共用 AI 呼叫（優先 Claude，fallback Gemini）────────────
+async function callAI(prompt){
+  // 先嘗試 Claude API（artifact 環境可用，不需 key）
+  try{
+    const r=await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({
+        model:'claude-sonnet-4-6',
+        max_tokens:1000,
+        messages:[{role:'user',content:prompt}]
+      })
+    });
+    const d=await r.json();
+    const text=d.content?.find(c=>c.type==='text')?.text||'';
+    if(text) return text;
+  }catch(e){console.warn('Claude API failed, trying Gemini:',e);}
+
+  // Fallback：Gemini
+  if(!GEMINI_API_KEY) throw new Error('No AI API available');
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+  });
+  const d=await r.json();
+  return d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+}
+
+
 async function autoSyncYuantaSilent(){
   // 1. 掃描 Gmail 取得所有元大對帳單郵件
   const q=encodeURIComponent(`from:${YUANTA_SENDER} subject:${YUANTA_SUBJECT} has:attachment`);
@@ -1381,19 +1463,108 @@ async function autoSyncYuantaSilent(){
 }
 
 
+// ── 從國泰 HTML 直接解析 portfolio（不需 AI）────────────────
+function parseKgiHtml(htmlStr, mailDateStr){
+  const doc=new DOMParser().parseFromString(htmlStr,'text/html');
+  const mailDate=mailDateStr?new Date(mailDateStr).toISOString().slice(0,10):'';
+
+  // 大盤數字：從 <td> 找「加權指數收盤」「漲跌」「成交金額」
+  let taiex=0,taiexChange=0,taiexPct=0,volumeB=0;
+  doc.querySelectorAll('td,span').forEach(el=>{
+    const t=el.textContent.trim();
+    const m1=t.match(/^([\d,]+\.?\d*)$/);
+    if(m1&&el.closest('td')?.previousElementSibling?.textContent.includes('加權指數'))
+      taiex=parseFloat(m1[1].replace(/,/g,''));
+  });
+  // 直接從文字中抓數字（更可靠）
+  const allText=doc.body.textContent;
+  const taiexM=allText.match(/加權指數收盤\s*([\d,]+\.?\d*)/);
+  if(taiexM) taiex=parseFloat(taiexM[1].replace(/,/g,''));
+  const chgM=allText.match(/漲跌[^▲▼\d]*([\d,]+\.?\d*)\s*\(\s*([\d.]+)%\s*\)/);
+  if(chgM){taiexChange=parseFloat(chgM[1].replace(/,/g,''));taiexPct=parseFloat(chgM[2]);}
+  // 判斷漲跌方向（看是否有「▼」或紅色跌）
+  const isDown=allText.includes('▼')&&allText.indexOf('▼')<allText.indexOf(chgM?.[0]||'XXXXXX')+50;
+  if(isDown){taiexChange=-taiexChange;taiexPct=-taiexPct;}
+  const volM=allText.match(/([\d,]+\.?\d*)億/);
+  if(volM) volumeB=parseFloat(volM[1].replace(/,/g,''));
+
+  // 持股：每檔結構為「股票名稱 → 價格 → 漲跌 → 成交量 → 看盤重點」
+  const holdings=[];
+  // 用股票名稱 <td> 找（font-size:22px bold）
+  doc.querySelectorAll('td[style*="font-size: 22px"], td[style*="font-size:22px"]').forEach(nameTd=>{
+    const name=nameTd.textContent.trim();
+    if(!name||name.length>10) return;
+    // 往父層找同一區塊
+    const block=nameTd.closest('table')?.parentElement?.closest('table');
+    if(!block) return;
+    const blockText=block.textContent;
+    // 股票代號：從圖片 src 抓（如 kchart/20260612/2887.png）
+    let code='';
+    block.querySelectorAll('img[src*="kchart"]').forEach(img=>{
+      const m=img.src.match(/kchart\/\d+\/(\w+)\.png/);
+      if(m) code=m[1];
+    });
+    if(!code) return;
+    // 價格
+    const priceM=blockText.match(/([\d,]+\.?\d{0,2})\s*$/m);
+    let price=0;
+    block.querySelectorAll('td[style*="font-size:40px"],td[style*="font-size: 40px"]').forEach(el=>{
+      const v=parseFloat(el.textContent.trim().replace(/,/g,''));
+      if(v>0) price=v;
+    });
+    // 漲跌
+    let chg=0,chgP=0;
+    const chgEl=block.querySelector('span[style*="font-size: 16px"][style*="font-weight: bold"]');
+    if(chgEl){
+      const cm=chgEl.textContent.match(/([\d.]+)\s*\(\s*([\d.]+)%\s*\)/);
+      if(cm){chg=parseFloat(cm[1]);chgP=parseFloat(cm[2]);}
+    }
+    // 成交量
+    let vol=0;
+    const volEl=[...block.querySelectorAll('td')].find(el=>el.textContent.includes('成交量'));
+    if(volEl){const vm=volEl.textContent.match(/([\d,]+)/g);if(vm?.length>=2)vol=parseInt(vm[1].replace(/,/g,''));}
+    // 看盤重點 signals
+    const signals=[];
+    const signalTd=[...block.querySelectorAll('td')].find(el=>el.textContent.includes('◉'));
+    if(signalTd){
+      signalTd.textContent.split('\n').forEach(l=>{
+        const s=l.replace(/◉/g,'').trim();
+        if(s) signals.push(s);
+      });
+    }
+    // report
+    let report='';
+    const reportTd=[...block.querySelectorAll('td[style*="#1C89C4"]')];
+    if(reportTd.length) report=reportTd[reportTd.length-1].textContent.trim().slice(0,120);
+
+    holdings.push({code,name,broker:'國泰證券',price,change:chg,change_pct:chgP,volume:vol,signals,events:[],report});
+  });
+
+  return{
+    _meta:{updated:mailDate,account:'國泰證券'},
+    market:{taiex,taiex_change:taiexChange,taiex_change_pct:taiexPct,volume_b:volumeB,date:mailDate},
+    holdings
+  };
+}
+
 async function autoSyncKgiSilent(){
-  const q=encodeURIComponent('subject:【AI投資日報】 newer_than:2d');
+  const pfUpdated=portfolio?._meta?.updated||'';
+  let rangeQ='newer_than:14d';
+  if(pfUpdated){
+    const d=new Date(pfUpdated);d.setDate(d.getDate()+1);
+    rangeQ=`after:${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  }
+  const q=encodeURIComponent(`subject:【AI投資日報】 ${rangeQ}`);
   const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
     {headers:{Authorization:'Bearer '+accessToken}});
   const data=await res.json();
   const messages=data.messages||[];
-  if(!messages.length) return; // 近2天無新信，跳過
+  if(!messages.length) return;
 
   const detail=await fetch(
     `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
     {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
 
-  // 取郵件日期，若 portfolio 已是當天則跳過
   const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
   const mailDate=dateHeader?new Date(dateHeader).toISOString().slice(0,10):'';
   if(mailDate&&portfolio?._meta?.updated===mailDate) return;
@@ -1405,27 +1576,11 @@ async function autoSyncKgiSilent(){
     if(payload.parts){for(const p of payload.parts){const b=getHtmlBody(p);if(b)return b;}}
     return'';
   }
-  function htmlToText(html){
-    const doc=new DOMParser().parseFromString(html,'text/html');
-    doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
-    doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
-    return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
-  }
-  const body=htmlToText(getHtmlBody(detail.payload));
-  if(!body||!GEMINI_API_KEY) return;
+  const htmlStr=getHtmlBody(detail.payload);
+  if(!htmlStr) return;
 
-  const displayDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
-  const prompt=`從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${displayDate}\n---\n${body.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
-
-  const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
-    method:'POST',headers:{'Content-Type':'application/json'},
-    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
-  });
-  const ai=await resp.json();
-  const raw=ai.candidates?.[0]?.content?.parts?.[0]?.text||'';
-  let parsed;
-  try{parsed=JSON.parse(raw.replace(/```json|```/g,'').trim());}
-  catch(e){console.warn('autoSyncKgi parse fail:',raw.slice(0,200));return;}
+  const parsed=parseKgiHtml(htmlStr, dateHeader);
+  if(!parsed.holdings.length&&!parsed.market.taiex) return; // 解析失敗
 
   const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
   const existId=list.files?.[0]?.id;
@@ -1440,8 +1595,14 @@ async function syncKgiPortfolio(){
   syncItems={};syncShow();
   syncSet('kgi_scan','掃描國泰 AI 投資日報','active');
   try{
-    // newer_than:30d 確保抓最近郵件，orderBy 不支援但 Gmail 預設最新優先，用 newer_than 縮窄
-    const q=encodeURIComponent('subject:【AI投資日報】 newer_than:30d');
+    // 動態計算起點：portfolio 最後更新日隔天，無資料抓 30 天
+    const pfUpd=portfolio?._meta?.updated||'';
+    let kgiRangeQ='newer_than:30d';
+    if(pfUpd){
+      const d=new Date(pfUpd);d.setDate(d.getDate()+1);
+      kgiRangeQ=`after:${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+    }
+    const q=encodeURIComponent(`subject:【AI投資日報】 ${kgiRangeQ}`);
     const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
       {headers:{Authorization:'Bearer '+accessToken}});
     const data=await res.json();
@@ -1456,64 +1617,30 @@ async function syncKgiPortfolio(){
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
       {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
     syncSet('kgi_parse','解析日報內容','active');
-    // 從 HTML payload 提取純文字
-    function getHtmlBody(payload){
+    function getHtmlBodyM(payload){
       if(!payload)return'';
       if(payload.mimeType==='text/html'&&payload.body?.data)
         return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
-      if(payload.parts){for(const p of payload.parts){const b=getHtmlBody(p);if(b)return b;}}
+      if(payload.parts){for(const p of payload.parts){const b=getHtmlBodyM(p);if(b)return b;}}
       return'';
     }
-    function htmlToText(html){
-      // 用 DOMParser 解析，textContent 在所有環境均可用（innerText 需 layout）
-      const doc=new DOMParser().parseFromString(html,'text/html');
-      doc.querySelectorAll('script,style,img,a[href]').forEach(el=>{
-        // 保留 a 標籤文字但移除連結
-        if(el.tagName==='A'){el.replaceWith(el.textContent);}
-        else el.remove();
-      });
-      // 將 <br>/<p>/<tr>/<div> 轉換為換行，再取 textContent
-      doc.querySelectorAll('br,p,tr,div').forEach(el=>{
-        el.after(doc.createTextNode('\n'));
-      });
-      return(doc.body?.textContent||'')
-        .replace(/\s{3,}/g,'\n')  // 多空白壓縮
-        .replace(/\n{3,}/g,'\n\n') // 多空行壓縮
-        .trim();
-    }
-    const rawHtml=getHtmlBody(detail.payload);
-    const body=rawHtml?htmlToText(rawHtml):'';
     const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
-    const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
-    syncSetState('kgi_parse','done');
-    syncSet('kgi_claude','Gemini 解析持股資料','active');
-    if(!GEMINI_API_KEY){syncSetState('kgi_claude','err');syncSet('kgi_json_err','找不到 Gemini API Key，請重新登入','err');syncHide();return;}
-    const geminiPrompt=`從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
-    const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
-      method:'POST',
-      headers:{'Content-Type':'application/json'},
-      body:JSON.stringify({contents:[{parts:[{text:geminiPrompt}]}]})
-    });
-    const ai=await resp.json();
-    const raw=ai.candidates?.[0]?.content?.parts?.[0]?.text||'';
-    let newPortfolio=null;
-    try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
-    catch(e){
-      syncSetState('kgi_claude','err');
-      // 顯示前 200 字讓使用者看到問題
-      const preview=raw.slice(0,200)||'(空回應)';
-      syncSet('kgi_json_err','AI 解析失敗 · 回傳：'+preview,'err');
-      console.error('Gemini raw:',raw);
+    const htmlStr=getHtmlBodyM(detail.payload);
+    if(!htmlStr){syncSetState('kgi_parse','err');syncSet('kgi_err2','找不到郵件內容','err');syncHide();return;}
+    const newPortfolio=parseKgiHtml(htmlStr, dateHeader);
+    if(!newPortfolio.market.taiex){
+      syncSetState('kgi_parse','err');
+      syncSet('kgi_err2','解析失敗：找不到大盤數字','err');
       syncHide();return;
     }
-    syncSetState('kgi_claude','done');
+    syncSetState('kgi_parse','done');
     syncSet('kgi_upload','上傳 portfolio.json','active');
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
     const existId=list.files?.[0]?.id;
     await driveUploadJson('portfolio.json',newPortfolio,existId);
     syncSetState('kgi_upload','done');
     portfolio=newPortfolio;renderPortfolio();renderDashboard();
-    syncSet('kgi_done','國泰日報同步完成 ✓','done');
+    syncSet('kgi_done',`國泰日報同步完成 ✓ (${newPortfolio._meta.updated})`,'done');
   }catch(err){syncSet('kgi_err','同步失敗：'+err.message,'err');console.error('KGI sync error',err);}
   syncHide();
 }
