@@ -263,7 +263,7 @@
     <div class="user-badge">
       <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
       <span id="user-name"></span>
-      <button class="sign-out-btn" onclick="showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
+      <button class="sign-out-btn" onclick="window.showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
       <button class="sign-out-btn" onclick="signOut()">登出</button>
     </div>
   </header>
@@ -521,6 +521,7 @@ window.doLogin=async function(){
     sessionStorage.setItem('mb_cid',cid);
     sessionStorage.setItem('mb_fid',fid);
     sessionStorage.setItem('mb_gkey',gkey);
+    sessionStorage.setItem('mb_email',email);
     setTimeout(()=>window._launchOAuth(cid,fid),400);
   }catch(e){
     setAuthMsg(e.code==='auth/invalid-credential'?'帳號或密碼錯誤':'錯誤：'+e.message);
@@ -540,6 +541,7 @@ window.fbDoSignOut=async function(){
   sessionStorage.removeItem('mb_cid');
   sessionStorage.removeItem('mb_fid');
   sessionStorage.removeItem('mb_gkey');
+  sessionStorage.removeItem('mb_email');
   try{await fbSignOut(fbAuth);}catch(e){}
 };
 
@@ -571,25 +573,28 @@ window.doCfgLogin=function(){
 
 // Update credentials for logged-in user
 window.fbUpdateCredentials=async function(pwd,cid,fid,gkey){
-  const user=fbAuth.currentUser;
-  if(!user){return{ok:false,msg:'未登入'};}
+  // 從 sessionStorage 取 email（doLogin 時已存）
+  const email=sessionStorage.getItem('mb_email')||'';
+  if(!email){return{ok:false,msg:'找不到登入 Email，請重新登入'};}
   try{
-    const key=await deriveKey(user.uid,pwd);
-    // Verify password by trying to decrypt existing record
-    const snap=await getDoc(doc(fbDb,'users',user.uid));
+    // 重新驗證取得 uid
+    const cred=await signInWithEmailAndPassword(fbAuth,email,pwd);
+    const uid=cred.user.uid;
+    const key=await deriveKey(uid,pwd);
+    const snap=await getDoc(doc(fbDb,'users',uid));
     if(!snap.exists()){return{ok:false,msg:'找不到帳號資料'};}
-    try{await aesDecrypt(snap.data().encClientId,key);}
-    catch(e){return{ok:false,msg:'密碼錯誤'};}
     const updates={};
     if(cid) updates.encClientId=await aesEncrypt(cid,key);
     if(fid) updates.encFolderId=await aesEncrypt(fid,key);
     if(gkey) updates.encGeminiKey=await aesEncrypt(gkey,key);
-    await setDoc(doc(fbDb,'users',user.uid),updates,{merge:true});
+    await setDoc(doc(fbDb,'users',uid),updates,{merge:true});
     if(cid) sessionStorage.setItem('mb_cid',cid);
     if(fid) sessionStorage.setItem('mb_fid',fid);
     if(gkey) sessionStorage.setItem('mb_gkey',gkey);
     return{ok:true};
-  }catch(e){return{ok:false,msg:e.message};}
+  }catch(e){
+    return{ok:false,msg:e.code==='auth/invalid-credential'?'密碼錯誤':e.message};
+  }
 };
 </script>
 
@@ -989,7 +994,7 @@ function renderInsight(d){
 async function loadMarketTicker(){
   // 抓加權指數(^TWII)、持股代號
   const codes=['^TWII'];
-  if(portfolio?.holdings) portfolio.holdings.slice(0,6).forEach(h=>{
+  if(portfolio?.holdings) portfolio.holdings.forEach(h=>{
     // Yahoo Finance TW 股票格式：代號.TW 或 .TWO
     codes.push(h.code+'.TW');
   });
@@ -1377,12 +1382,11 @@ function renderYuantaHistory(){
     const pnl=(d.pnl!==0&&d.pnl!=null)?d.pnl:(d.marketValue>10000&&cost>10000)?d.marketValue-cost:0;
     const pnlColor=pnl>0?'#f87171':pnl<0?'#34d399':'#94a3b8';
     const holdingsHtml=d.holdings?.length?
-      `<div class="yuanta-holdings">${d.holdings.slice(0,6).map(h=>`
+      `<div class="yuanta-holdings">${d.holdings.map(h=>`
         <div class="yuanta-holding-row">
           <div><div class="yuanta-holding-name">${h.name}</div><div class="yuanta-holding-code">${h.code}</div></div>
           <div class="yuanta-holding-pnl" style="color:#7dd3fc">${h.shares?h.shares.toLocaleString()+' 股':'—'}</div>
         </div>`).join('')}
-        ${d.holdings.length>6?`<div style="color:var(--muted);font-size:11px;margin-top:6px">… 另 ${d.holdings.length-6} 檔</div>`:''}
       </div>`:'';
     return`<div class="yuanta-month-card">
       <div class="yuanta-month-header">
@@ -1820,4 +1824,4 @@ async function doPasteJson(){
   try{
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
     const existId=list.files?.[0]?.id;
-    await driveUploadJson('portfolio.js
+    await driveUploadJson('port
