@@ -146,7 +146,7 @@
   <span>⚠️ DEV 測試版 · 非正式版本，請勿分享此連結</span>
   <span style="opacity:.7">v1.4.1-dev · 2026-06-14</span>
   <div style="display:flex;gap:6px">
-    <button id="dev-cred-btn" style="background:rgba(0,0,0,.3);border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:'Space Mono',monospace">⚙️ 更新憑證</button>
+    <button onclick="showCredModal()" style="background:rgba(0,0,0,.3);border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px;font-family:'Space Mono',monospace">⚙️ 更新憑證</button>
     <button onclick="document.getElementById('dev-banner').style.display='none'" style="background:none;border:1px solid #fff8;color:#fff;padding:2px 10px;border-radius:4px;cursor:pointer;font-size:11px">關閉</button>
   </div>
 </div>
@@ -266,7 +266,7 @@
     <div class="user-badge">
       <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
       <span id="user-name"></span>
-      <button class="sign-out-btn" id="open-cred-btn" style="margin-right:4px">⚙️ 更新憑證</button>
+      <button class="sign-out-btn" onclick="showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
       <button class="sign-out-btn" onclick="signOut()">登出</button>
     </div>
   </header>
@@ -1819,4 +1819,4 @@ function showPasteJsonModal(){
 async function doPasteJson(){
   const raw=document.getElementById('paste-json-input').value.trim();
   const msg=document.getElementById('paste-json-msg');
-  if(!raw){msg.textCont
+  if(!ra
