@@ -739,7 +739,14 @@ async function loadAll(){
   const pfFile=files.find(f=>f.name==='portfolio.json');
   if(pfFile){
     const r=await driveGetFile(pfFile.id);
-    try{portfolio=await r.json()}catch(e){portfolio=null}
+    try{
+      const pf=await r.json();
+      // 驗證：必須有 holdings 陣列且 updated 為 YYYY-MM-DD 格式
+      const validDate=/^\d{4}-\d{2}-\d{2}$/.test(pf?._meta?.updated||'');
+      const validHoldings=Array.isArray(pf?.holdings);
+      portfolio=(validDate&&validHoldings)?pf:null;
+      if(!portfolio) console.warn('portfolio.json 驗證失敗，將重新同步');
+    }catch(e){portfolio=null;}
   }
   setStep(steps,2,'done');
 
@@ -747,7 +754,10 @@ async function loadAll(){
   const yhFile=files.find(f=>f.name==='yuanta_history.json');
   if(yhFile){
     const r=await driveGetFile(yhFile.id);
-    try{yuantaHistory=await r.json()}catch(e){yuantaHistory=null}
+    try{
+      const yh=await r.json();
+      yuantaHistory=(yh?.months&&typeof yh.months==='object')?yh:null;
+    }catch(e){yuantaHistory=null;}
   }
   setStep(steps,3,'done');
 
@@ -759,10 +769,11 @@ async function loadAll(){
   renderDashboard();
   setStep(steps,4,'done');
 
-  // ── Step 5：自動同步國泰日報（今日未更新才觸發）────────
+  // ── Step 5：自動同步國泰日報（portfolio 無效或非今日才觸發）
   const today=new Date().toISOString().slice(0,10);
   const pfUpdated=portfolio?._meta?.updated||'';
-  if(pfUpdated!==today){
+  const pfValid=/^\d{4}-\d{2}-\d{2}$/.test(pfUpdated);
+  if(!pfValid||pfUpdated!==today){
     setStep(steps,5,'active');
     try{
       await autoSyncKgiSilent();
@@ -1785,9 +1796,4 @@ async function doPasteJson(){
       style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
 
     <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
-    <input id="upd-fid" type="text" autocomplete="off" placeholder="（留空=不變）"
-      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
-
-    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
-    <input id="upd-gkey" type="password" autocomplete="off" placeholder="（留空=不變）"
-      style="
+    <input id="upd-fid" type
