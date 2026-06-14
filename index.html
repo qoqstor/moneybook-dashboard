@@ -76,10 +76,10 @@
     .insight-row strong{color:#e2e8f0}
     .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
     .chart-wrap{position:relative;height:220px}
-    .user-badge{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px}
+    .user-badge{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px;position:relative;z-index:100}
     .user-badge img{width:24px;border-radius:50%}
     .user-badge span{color:var(--muted);font-size:12px}
-    .sign-out-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Noto Sans TC',sans-serif}
+    .sign-out-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;position:relative;z-index:10}
     .sign-out-btn:hover{color:#f87171;border-color:#f87171}
     .month-btn{padding:5px 14px;border-radius:6px;border:none;cursor:pointer;background:#111128;color:var(--muted);font-size:12px;font-family:'Space Mono',monospace;transition:all .2s}
     .month-btn.active{background:#1e3a5f;color:#7dd3fc;border-bottom:2px solid #3b82f6}
@@ -266,7 +266,7 @@
     <div class="user-badge">
       <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
       <span id="user-name"></span>
-      <button class="sign-out-btn" onclick="window.showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
+      <button class="sign-out-btn" onclick="var m=document.getElementById('cred-modal');m.style.display='flex';m.style.width='100%';m.style.height='100%';document.getElementById('upd-cid').value='';document.getElementById('upd-fid').value='';document.getElementById('upd-gkey').value='';document.getElementById('upd-pwd').value='';document.getElementById('cred-msg').textContent='';" style="margin-right:4px">⚙️ 更新憑證</button>
       <button class="sign-out-btn" onclick="signOut()">登出</button>
     </div>
   </header>
@@ -1800,15 +1800,4 @@ async function resetPortfolio(){
     const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
     const id=list.files?.[0]?.id;
     if(id){
-      await fetch(`https://www.googleapis.com/drive/v3/files/${id}`,
-        {method:'DELETE',headers:{Authorization:'Bearer '+accessToken}});
-    }
-    syncSetState('reset','done');
-    portfolio=null;
-    syncSet('reset_sync','重新同步國泰日報…','active');
-    await syncKgiPortfolio();
-  }catch(e){syncSetState('reset','err');syncSet('reset_err','失敗：'+e.message,'err');}
-  syncHide();
-}
-
-function showPaste
+      await fetch(`https:/
