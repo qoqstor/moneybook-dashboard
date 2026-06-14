@@ -987,16 +987,16 @@ function extractYuantaData(text, filename){
   const mvAll=[...text.matchAll(/(?:總?市值|持股市值)[^\d\n]*([\d,]+)/g)];
   if(mvAll.length){const vals=mvAll.map(m=>parseInt(m[1].replace(/,/g,'')));marketValue=Math.max(...vals);}
 
-  // 成本 — 取最大值
+  // 成本 — 先找明確成本欄位，再 fallback 到市值-損益
   let cost=0;
-  const costAll=[...text.matchAll(/(?:買進|持股|原始)?成本[^\d\n]*([\d,]+)/g)];
-  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,'')));cost=Math.max(...vals);}
+  const costAll=[...text.matchAll(/(?:買進|持股|原始|參考)?成本[^\d\n（(]*([\d,]+)/g)];
+  if(costAll.length){const vals=costAll.map(m=>parseInt(m[1].replace(/,/g,'')));cost=Math.max(...vals.filter(v=>v>1000));}
 
-  // 損益 — 先找括號負數，再找一般格式
+  // 損益 — 先找括號負數，再找一般格式（支援全形括號）
   let pnl=0;
-  const pnlNeg=text.match(/(?:未實現|評估)?損益[^\d\n(]*\(([\d,]+)\)/);
+  const pnlNeg=text.match(/(?:未實現|評估)?損益[^\d\n(（]*[（(]([\d,]+)[）)]/);
   if(pnlNeg){pnl=-parseInt(pnlNeg[1].replace(/,/g,''));}
-  else{const pnlPos=text.match(/(?:未實現|評估)?損益[^\d\n]*(-?[\d,]+)/);if(pnlPos)pnl=parseInt(pnlPos[1].replace(/,/g,''));}
+  else{const pnlPos=text.match(/(?:未實現|評估)?損益[^\d\n-]*(-?[\d,]+)/);if(pnlPos)pnl=parseInt(pnlPos[1].replace(/,/g,''));}
 
   // Holdings — 以股票代號去重（修正大魯閣等重複顯示問題）
   const holdingsMap={};
@@ -1012,6 +1012,10 @@ function extractYuantaData(text, filename){
 
   // 市值 fallback：從持股加總
   if(!marketValue&&holdings.length)marketValue=holdings.reduce((s,h)=>s+h.value,0);
+  // 成本 fallback 1：市值 - 損益
+  if(!cost&&marketValue&&pnl!==0) cost=marketValue-pnl;
+  // 成本 fallback 2：持股加總
+  if(!cost&&holdings.length) cost=holdings.reduce((s,h)=>s+h.value,0);
 
   return{month,marketValue,cost,pnl,holdings,rawTextLength:text.length};
 }
@@ -1265,19 +1269,29 @@ async function syncKgiPortfolio(){
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
       {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
     syncSet('kgi_parse','解析日報內容','active');
-    function getBody(payload){
+    // 從 HTML payload 提取純文字
+    function getHtmlBody(payload){
       if(!payload)return'';
-      if(payload.body?.data)return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
-      if(payload.parts){for(const p of payload.parts){const b=getBody(p);if(b)return b;}}
+      if(payload.mimeType==='text/html'&&payload.body?.data)
+        return atob(payload.body.data.replace(/-/g,'+').replace(/_/g,'/'));
+      if(payload.parts){for(const p of payload.parts){const b=getHtmlBody(p);if(b)return b;}}
       return'';
     }
-    const body=getBody(detail.payload);
+    function htmlToText(html){
+      const doc=new DOMParser().parseFromString(html,'text/html');
+      // 移除 script/style
+      doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+      return doc.body?.innerText||doc.body?.textContent||'';
+    }
+    const rawHtml=getHtmlBody(detail.payload);
+    const body=rawHtml?htmlToText(rawHtml):'';
     const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
     const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
     syncSetState('kgi_parse','done');
     syncSet('kgi_claude','Gemini 解析持股資料','active');
     if(!GEMINI_API_KEY){syncSetState('kgi_claude','err');syncSet('kgi_json_err','找不到 Gemini API Key，請重新登入','err');syncHide();return;}
-    const geminiPrompt=`從以下國泰證券 AI 投資日報提取持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,6000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
+    // 純文字通常 <3000 字，不需截斷；保留 12000 字以防萬一
+    const geminiPrompt=`從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${mailDate}\n---\n${body.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
     const resp=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key=${GEMINI_API_KEY}`,{
       method:'POST',
       headers:{'Content-Type':'application/json'},
