@@ -1,0 +1,1909 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>個人財務儀表板</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/papaparse@5.4.1/papaparse.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;700;900&family=Space+Mono:wght@400;700&display=swap" rel="stylesheet"/>
+  <style>
+    *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+    :root{--bg:#07071a;--card:#0d0d1f;--border:#1e1e38;--accent:#6366f1;--accent2:#06b6d4;--text:#e2e8f0;--muted:#475569;--dim:#1e293b}
+    body{background:var(--bg);color:var(--text);font-family:'Noto Sans TC',sans-serif;min-height:100vh;background-image:radial-gradient(ellipse 80% 40% at 50% 0%,#1e1b4b44,transparent)}
+    .grid-bg{position:fixed;inset:0;pointer-events:none;z-index:0;background-image:linear-gradient(rgba(99,102,241,.03) 1px,transparent 1px),linear-gradient(90deg,rgba(99,102,241,.03) 1px,transparent 1px);background-size:48px 48px}
+    .wrap{position:relative;z-index:1;max-width:960px;margin:0 auto;padding:32px 16px 80px}
+    #auth-screen{display:flex;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;text-align:center;gap:20px}
+    #auth-screen h1{font-size:28px;font-weight:900;letter-spacing:-1px}
+    #auth-screen p{color:var(--muted);font-size:14px;max-width:360px;line-height:1.7}
+    .btn-auth{display:flex;align-items:center;gap:12px;background:#fff;color:#1a1a1a;border:none;padding:13px 28px;border-radius:10px;font-size:15px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;box-shadow:0 4px 20px #0008;transition:transform .15s}
+    .btn-auth:hover{transform:translateY(-2px)}
+    .btn-auth img{width:22px}
+    #loading-screen{display:none;flex-direction:column;align-items:center;justify-content:center;min-height:100vh;gap:16px}
+    .spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:spin 1s linear infinite}
+    @keyframes spin{to{transform:rotate(360deg)}}
+    .load-step{color:var(--muted);font-size:13px;font-family:'Space Mono',monospace}
+    .load-steps{display:flex;flex-direction:column;gap:6px;margin-top:8px;align-items:flex-start}
+    .load-step.done{color:#34d399}
+    .load-step.active{color:var(--accent2)}
+    #dashboard{display:none}
+    header{text-align:center;margin-bottom:32px}
+    header .label{font-size:10px;letter-spacing:5px;color:var(--accent);text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:8px}
+    header h1{font-size:26px;font-weight:900;letter-spacing:-1px}
+    header .meta{color:var(--muted);font-size:12px;margin-top:8px}
+    .stat-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:12px;margin-bottom:24px}
+    .stat-card{background:var(--card);border-radius:14px;padding:18px 16px;border-top:2px solid transparent}
+    .stat-card .slabel{font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:8px}
+    .stat-card .sval{font-size:20px;font-weight:900;font-family:'Space Mono',monospace}
+    .stat-card .ssub{font-size:11px;color:var(--muted);margin-top:4px}
+    .tabs{display:flex;gap:8px;margin-bottom:20px;flex-wrap:wrap}
+    .tab-btn{padding:8px 18px;border-radius:8px;border:none;cursor:pointer;background:#111128;color:var(--muted);font-size:13px;font-family:'Noto Sans TC',sans-serif;transition:all .2s}
+    .tab-btn.active{background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;font-weight:700;box-shadow:0 4px 16px #4f46e540}
+    .tab-panel{display:none}
+    .tab-panel.active{display:flex;flex-direction:column;gap:20px}
+    .card{background:var(--card);border:1px solid var(--border);border-radius:16px;padding:24px 20px}
+    .card-title{font-size:11px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:20px}
+    .bar-row{margin-bottom:12px}
+    .bar-row-label{display:flex;justify-content:space-between;margin-bottom:5px}
+    .bar-row-label span:first-child{color:#94a3b8;font-size:13px}
+    .bar-row-label span:last-child{color:var(--text);font-size:12px;font-family:'Space Mono',monospace}
+    .bar-track{height:6px;background:var(--dim);border-radius:3px}
+    .bar-fill{height:100%;border-radius:3px;transition:width 1s cubic-bezier(.4,0,.2,1)}
+    .heatmap-cell{height:32px;border-radius:6px;display:flex;align-items:center;justify-content:center;font-size:9px;font-family:'Space Mono',monospace;cursor:default}
+    .stock-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:12px}
+    .stock-header{display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:12px}
+    .stock-name{font-size:18px;font-weight:900;color:var(--text)}
+    .stock-code{font-size:12px;color:var(--muted);font-family:'Space Mono',monospace;margin-top:2px}
+    .stock-price{text-align:right}
+    .stock-price .price{font-size:26px;font-weight:900;font-family:'Space Mono',monospace}
+    .stock-price .chg{font-size:13px;font-weight:700;margin-top:2px}
+    .up{color:#f87171}.down{color:#34d399}.flat{color:#94a3b8}
+    .signals{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+    .signal-tag{padding:3px 10px;border-radius:20px;font-size:11px;font-weight:700;font-family:'Space Mono',monospace}
+    .signal-warn{background:#f9731620;color:#fb923c;border:1px solid #f9731640}
+    .signal-good{background:#34d39920;color:#34d399;border:1px solid #34d39940}
+    .signal-neu{background:#6366f120;color:#818cf8;border:1px solid #6366f140}
+    .event-badge{display:inline-flex;align-items:center;gap:6px;background:#fbbf2420;border:1px solid #fbbf2440;color:#fbbf24;border-radius:8px;padding:6px 12px;font-size:12px;margin-top:10px}
+    .market-bar{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:20px}
+    .mbar-item{background:var(--card);border:1px solid var(--border);border-radius:12px;padding:14px 16px;text-align:center}
+    .mbar-label{font-size:10px;color:var(--muted);letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:6px}
+    .mbar-val{font-size:20px;font-weight:900;font-family:'Space Mono',monospace}
+    .insight{background:linear-gradient(135deg,#0d0d1f,#12102a);border:1px solid #312e81;border-radius:16px;padding:20px 24px}
+    .insight-title{color:#818cf8;font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:14px}
+    .insight-row{display:flex;gap:10px;margin-bottom:12px;align-items:flex-start}
+    .insight-row p{color:#94a3b8;font-size:13px;line-height:1.7}
+    .insight-row strong{color:#e2e8f0}
+    .two-col{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+    .chart-wrap{position:relative;height:220px}
+    .user-badge{display:flex;align-items:center;gap:8px;justify-content:center;margin-top:12px;position:relative;z-index:100}
+    .user-badge img{width:24px;border-radius:50%}
+    .user-badge span{color:var(--muted);font-size:12px}
+    .sign-out-btn{background:none;border:1px solid var(--border);color:var(--muted);padding:4px 12px;border-radius:6px;font-size:11px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;position:relative;z-index:10}
+    .sign-out-btn:hover{color:#f87171;border-color:#f87171}
+    .month-btn{padding:5px 14px;border-radius:6px;border:none;cursor:pointer;background:#111128;color:var(--muted);font-size:12px;font-family:'Space Mono',monospace;transition:all .2s}
+    .month-btn.active{background:#1e3a5f;color:#7dd3fc;border-bottom:2px solid #3b82f6}
+    .month-sel{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}
+    .hm-label{color:var(--muted);font-size:12px;font-family:'Space Mono',monospace;display:flex;align-items:center}
+    .hm-header{color:var(--muted);font-size:11px;text-align:center;font-family:'Space Mono',monospace}
+    footer{text-align:center;margin-top:40px;color:#1e293b;font-size:11px;font-family:'Space Mono',monospace}
+    .no-portfolio{color:var(--muted);font-size:14px;text-align:center;padding:40px 0}
+    @media(max-width:600px){.stat-grid{grid-template-columns:1fr 1fr}.two-col{grid-template-columns:1fr}.market-bar{grid-template-columns:1fr}}
+
+    /* ── Sync Badge ── */
+    #sync-badge{position:fixed;bottom:20px;right:20px;z-index:9998;background:#0d1117;border:1px solid #6366f1;border-radius:12px;padding:12px 18px;font-family:'Space Mono',monospace;font-size:12px;color:#e2e8f0;box-shadow:0 4px 24px #0008;min-width:260px;display:none;transition:opacity .3s}
+    #sync-badge.visible{display:block}
+    .sync-title{color:#818cf8;font-size:10px;letter-spacing:2px;text-transform:uppercase;margin-bottom:8px}
+    .sync-row{display:flex;align-items:center;gap:8px;margin-bottom:4px;font-size:11px;color:#94a3b8}
+    .sync-row.done{color:#34d399}
+    .sync-row.active{color:#06b6d4}
+    .sync-row.err{color:#f87171}
+    .sync-spinner{width:10px;height:10px;border:2px solid #1e293b;border-top-color:#06b6d4;border-radius:50%;animation:spin .7s linear infinite;flex-shrink:0}
+
+    /* ── PDF Import ── */
+    #pdf-drop-zone{border:2px dashed var(--border);border-radius:12px;padding:32px;text-align:center;cursor:pointer;transition:all .2s;margin-bottom:16px}
+    #pdf-drop-zone:hover,#pdf-drop-zone.drag-over{border-color:var(--accent);background:#6366f108}
+    #pdf-drop-zone p{color:var(--muted);font-size:13px;margin-top:8px}
+    #pdf-progress{display:none;margin-top:12px}
+    .pdf-item{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px;font-family:'Space Mono',monospace}
+    .pdf-item .status{width:16px;height:16px;border-radius:50%;flex-shrink:0;display:flex;align-items:center;justify-content:center;font-size:10px}
+    .pdf-item .status.pending{background:#1e293b;color:#475569}
+    .pdf-item .status.processing{background:#0c4a6e;border:2px solid #06b6d4;animation:pulse .8s ease-in-out infinite alternate}
+    .pdf-item .status.ok{background:#14532d;color:#34d399}
+    .pdf-item .status.err{background:#450a0a;color:#f87171}
+    @keyframes pulse{from{opacity:.6}to{opacity:1}}
+
+    /* ── Yuanta History ── */
+    .yuanta-month-card{background:var(--card);border:1px solid var(--border);border-radius:14px;padding:18px 20px;margin-bottom:12px}
+    .yuanta-month-header{display:flex;justify-content:space-between;align-items:center;margin-bottom:14px}
+    .yuanta-month-title{font-size:16px;font-weight:900;font-family:'Space Mono',monospace;color:var(--text)}
+    .yuanta-stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px}
+    .yuanta-stat{background:var(--dim);border-radius:8px;padding:10px 12px;text-align:center}
+    .yuanta-stat-label{font-size:9px;letter-spacing:2px;text-transform:uppercase;color:var(--muted);font-family:'Space Mono',monospace;margin-bottom:4px}
+    .yuanta-stat-val{font-size:16px;font-weight:900;font-family:'Space Mono',monospace}
+    .yuanta-holdings{margin-top:14px}
+    .yuanta-holding-row{display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--border);font-size:12px}
+    .yuanta-holding-name{color:var(--text);font-weight:700}
+    .yuanta-holding-code{color:var(--muted);font-family:'Space Mono',monospace;font-size:11px}
+    .yuanta-holding-pnl{font-family:'Space Mono',monospace;font-weight:700;font-size:13px}
+
+    /* ── Password Modal ── */
+    #pwd-modal{position:fixed;top:0;left:0;right:0;bottom:0;background:#000a;z-index:10000;display:none;align-items:center;justify-content:center;padding:20px;box-sizing:border-box}
+    #pwd-modal.visible{display:flex}
+    .pwd-box{background:#0d0d1f;border:1px solid var(--border);border-radius:16px;padding:32px;max-width:360px;width:100%}
+    .pwd-box h3{font-size:16px;font-weight:900;margin-bottom:8px}
+    .pwd-box p{color:var(--muted);font-size:13px;margin-bottom:20px;line-height:1.6}
+    .pwd-input{width:100%;background:#111128;border:1px solid var(--border);color:var(--text);padding:10px 14px;border-radius:8px;font-size:14px;font-family:'Space Mono',monospace;margin-bottom:12px}
+    .pwd-input:focus{outline:none;border-color:var(--accent)}
+    .pwd-btn{width:100%;padding:10px;border-radius:8px;border:none;background:var(--accent);color:#fff;font-weight:700;font-size:14px;cursor:pointer;font-family:'Noto Sans TC',sans-serif}
+    .btn-secondary{display:inline-block;background:none;border:1px solid var(--border);color:var(--muted);padding:8px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-top:8px;width:100%;text-align:center}
+  </style>
+</head>
+<body>
+
+<div class="grid-bg"></div>
+
+<!-- Auth -->
+<div id="auth-screen">
+  <div style="font-size:40px">💳</div>
+  <h1>個人財務儀表板</h1>
+  <p>登入後自動帶入您的 Google Drive 設定，免手動輸入。</p>
+
+  <!-- Message -->
+  <div id="auth-msg" style="min-height:18px;font-size:13px;font-family:'Space Mono',monospace;color:#f87171"></div>
+
+  <!-- ── Login Panel ── -->
+  <div id="panel-login" style="width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">🔐 登入</div>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Email</label>
+    <input id="login-email" type="email" autocomplete="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">密碼</label>
+    <input id="login-pwd" type="password" autocomplete="current-password" placeholder="••••••••"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"
+      onkeydown="if(event.key==='Enter')window.doLogin()"/>
+    <label style="display:flex;align-items:center;gap:8px;font-size:12px;color:#64748b;margin-bottom:14px;cursor:pointer">
+      <input type="checkbox" id="login-remember" style="width:14px;height:14px;accent-color:#6366f1"/>
+      記住帳號密碼（存於本裝置）
+    </label>
+    <button onclick="window.doLogin()"
+      style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      登入
+    </button>
+    <div style="display:flex;justify-content:space-between;font-size:12px">
+      <a href="#" onclick="window.showPanel('panel-register');return false" style="color:#818cf8;text-decoration:none">還沒帳號？註冊</a>
+      <a href="#" onclick="window.showPanel('panel-forgot');return false" style="color:#64748b;text-decoration:none">忘記密碼</a>
+    </div>
+    <div style="text-align:center;margin-top:10px"><a href="#" onclick="window.showPanel('panel-cfg');return false" style="color:#334155;font-size:11px;text-decoration:none">手動輸入設定</a></div>
+  </div>
+
+  <!-- ── Register Panel ── -->
+  <div id="panel-register" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">📝 建立帳號</div>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Email</label>
+    <input id="reg-email" type="email" autocomplete="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">密碼（至少 6 碼）</label>
+    <input id="reg-pwd" type="password" autocomplete="new-password" placeholder="••••••••"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:10px;font-family:'Space Mono',monospace"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="reg-cid" type="text" autocomplete="off" placeholder="xxx.apps.googleusercontent.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="reg-fid" type="text" autocomplete="off" placeholder="Google Drive Folder ID"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
+    <input id="reg-gemini" type="password" autocomplete="off" placeholder="AIza…"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')window.doRegister()"/>
+    <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:8px;padding:10px;font-size:11px;color:#475569;margin-bottom:14px;line-height:1.6">
+      🔒 CLIENT_ID、FOLDER_ID、Gemini API Key 均以 AES-256 加密儲存，伺服器無法讀取原始值。
+    </div>
+    <button onclick="window.doRegister()"
+      style="width:100%;background:linear-gradient(135deg,#4f46e5,#7c3aed);border:none;color:#fff;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      建立帳號
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
+  </div>
+
+  <!-- ── Forgot Panel ── -->
+  <div id="panel-forgot" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">📧 重設密碼</div>
+    <p style="color:#64748b;font-size:12px;margin-bottom:12px;line-height:1.6">輸入您的 Email，我們會寄送密碼重設連結。</p>
+    <input id="forgot-email" type="email" placeholder="your@email.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:13px;margin-bottom:14px;font-family:'Space Mono',monospace"
+      onkeydown="if(event.key==='Enter')window.doForgot()"/>
+    <button onclick="window.doForgot()"
+      style="width:100%;background:#1e3a5f;border:none;color:#7dd3fc;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      寄送重設信
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
+  </div>
+
+  <!-- ── Manual Config Panel (fallback) ── -->
+  <div id="panel-cfg" style="display:none;width:100%;max-width:360px;text-align:left;background:#1e293b;border:1px solid #334155;border-radius:12px;padding:20px;font-size:13px;">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:14px;font-family:'Space Mono',monospace">⚙️ 手動設定</div>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="cfg-client-id" type="password" autocomplete="off" placeholder="xxx.apps.googleusercontent.com"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="cfg-folder-id" type="password" autocomplete="off" placeholder="Google Drive Folder ID"
+      style="width:100%;box-sizing:border-box;background:#0f172a;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"/>
+    <button onclick="window.doCfgLogin()"
+      style="width:100%;background:#1e3a5f;border:none;color:#7dd3fc;padding:10px;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif;margin-bottom:10px">
+      使用 Google 帳號登入
+    </button>
+    <div style="text-align:center"><a href="#" onclick="window.showPanel('panel-login');return false" style="color:#64748b;font-size:12px;text-decoration:none">← 返回登入</a></div>
+  </div>
+
+  <p style="font-size:11px;color:#1e293b;margin-top:8px">讀寫 Moneybook 資料夾與 Gmail 對帳單</p>
+</div>
+
+<!-- Loading -->
+<div id="loading-screen">
+  <div class="spinner"></div>
+  <div style="font-size:14px;color:#94a3b8;font-family:'Space Mono',monospace">讀取中…</div>
+  <div class="load-steps" id="load-steps"></div>
+</div>
+
+<!-- Dashboard -->
+<div id="dashboard">
+<div class="wrap">
+  <header>
+    <div class="label">個人財務儀表板 · MONEYBOOK + 證券</div>
+    <h1>消費 &amp; 投資總覽</h1>
+    <div class="meta" id="meta-line">讀取中…</div>
+    <div class="user-badge">
+      <img id="user-avatar" src="" alt="" onerror="this.style.display='none'"/>
+      <span id="user-name"></span>
+      <button class="sign-out-btn" onclick="showCredModal()" style="margin-right:4px">⚙️ 更新憑證</button>
+      <button class="sign-out-btn" onclick="signOut()">登出</button>
+    </div>
+  </header>
+
+  <!-- 盤前資訊橫幅 -->
+  <div id="market-ticker" style="background:#0d0d1f;border:1px solid var(--border);border-radius:12px;padding:12px 16px;margin-bottom:20px;display:none">
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+      <div style="font-size:10px;letter-spacing:2px;color:var(--muted);font-family:'Space Mono',monospace">📡 台股即時</div>
+      <div id="ticker-time" style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace"></div>
+    </div>
+    <div id="ticker-content" style="display:flex;gap:16px;flex-wrap:wrap;margin-top:10px"></div>
+  </div>
+
+  <div class="stat-grid">
+    <div class="stat-card" style="border-color:#6366f1">
+      <div class="slabel">最新月消費</div>
+      <div class="sval" id="stat-latest" style="color:#6366f1">—</div>
+      <div class="ssub" id="stat-latest-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#06b6d4">
+      <div class="slabel">今年累計</div>
+      <div class="sval" id="stat-ytd" style="color:#06b6d4">—</div>
+      <div class="ssub" id="stat-ytd-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#f97316">
+      <div class="slabel">持股數</div>
+      <div class="sval" id="stat-stocks" style="color:#f97316">—</div>
+      <div class="ssub" id="stat-stocks-sub">—</div>
+    </div>
+    <div class="stat-card" style="border-color:#34d399">
+      <div class="slabel">加權指數</div>
+      <div class="sval" id="stat-taiex" style="color:#34d399">—</div>
+      <div class="ssub" id="stat-taiex-sub">—</div>
+    </div>
+  </div>
+
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('trend',event)">📈 年度趨勢</button>
+    <button class="tab-btn" onclick="switchTab('heatmap',event)">🔥 月度熱圖</button>
+    <button class="tab-btn" onclick="switchTab('cats',event)">🏷️ 類別分析</button>
+    <button class="tab-btn" onclick="switchTab('monthly',event)">🗓️ 月份詳解</button>
+    <button class="tab-btn" onclick="switchTab('portfolio',event)">📊 投資組合</button>
+  </div>
+
+  <!-- Trend -->
+  <div class="tab-panel active" id="tab-trend">
+    <div class="card"><div class="card-title">年度支出總覽</div><div class="chart-wrap"><canvas id="chart-annual"></canvas></div></div>
+    <div class="two-col">
+      <div class="card"><div class="card-title">生活支出趨勢</div><div class="chart-wrap"><canvas id="chart-lifestyle"></canvas></div></div>
+      <div class="card"><div class="card-title">飲食 vs 購物</div><div class="chart-wrap"><canvas id="chart-food-shop"></canvas></div></div>
+    </div>
+    <div class="insight" id="insight-box"></div>
+  </div>
+
+  <!-- Heatmap -->
+  <div class="tab-panel" id="tab-heatmap">
+    <div class="card">
+      <div class="card-title">月度消費熱圖</div>
+      <div id="heatmap-container" style="overflow-x:auto"></div>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:16px">
+        <span style="color:var(--muted);font-size:11px">低</span>
+        <div id="heatmap-legend" style="display:flex;gap:4px"></div>
+        <span style="color:var(--muted);font-size:11px">高</span>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">歷史高峰月份 TOP 8</div><div id="peak-list"></div></div>
+  </div>
+
+  <!-- Cats -->
+  <div class="tab-panel" id="tab-cats">
+    <div class="card"><div class="card-title">全時段類別分布</div><div id="cat-bars-all"></div></div>
+    <div class="card">
+      <div class="card-title">按年份篩選</div>
+      <div class="month-sel" id="year-sel"></div>
+      <div id="cat-bars-year"></div>
+    </div>
+  </div>
+
+  <!-- Monthly -->
+  <div class="tab-panel" id="tab-monthly">
+    <div class="card">
+      <div class="card-title">選擇月份</div>
+      <div style="display:flex;gap:12px;flex-wrap:wrap;align-items:center">
+        <select id="month-year-sel" style="background:#111128;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:14px;font-family:'Noto Sans TC',sans-serif"></select>
+        <select id="month-mon-sel" style="background:#111128;border:1px solid var(--border);color:var(--text);padding:8px 12px;border-radius:8px;font-size:14px;font-family:'Noto Sans TC',sans-serif"></select>
+      </div>
+    </div>
+    <div class="card"><div class="card-title">月份消費明細</div><div id="monthly-content"></div></div>
+  </div>
+
+  <!-- Portfolio -->
+  <div class="tab-panel" id="tab-portfolio">
+    <div class="card-title" style="padding:0 4px;margin-bottom:4px">📡 資料來源：Drive/Moneybook/portfolio.json · 每次更新後上傳覆蓋即自動同步</div>
+    <div class="market-bar" id="market-bar"></div>
+    <div id="portfolio-content"><div class="no-portfolio">載入中…</div></div>
+    <div class="insight" id="portfolio-insight"></div>
+
+    <!-- 元大歷史對帳單 -->
+    <div class="card" style="margin-top:8px">
+      <div class="card-title" style="margin-bottom:12px">🏦 元大歷史對帳單</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px">
+        <button onclick="startGmailSync()" style="background:linear-gradient(135deg,#1d4ed8,#2563eb);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📧 Gmail 自動同步</button>
+        <button onclick="document.getElementById('pdf-file-input').click()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📄 手動匯入 PDF</button>
+        <button onclick="syncKgiPortfolio()" style="background:linear-gradient(135deg,#065f46,#059669);border:none;color:#fff;padding:9px 18px;border-radius:8px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🤖 同步國泰日報</button>
+        <button onclick="showPasteJsonModal()" style="background:#111128;border:1px solid var(--border);color:var(--muted);padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">📋 貼入 JSON</button>
+        <button onclick="resetPortfolio()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 14px;border-radius:8px;font-size:12px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🔄 重置並重新同步</button>
+        <button onclick="setFixedCost()" style="background:#111128;border:1px solid #1e3a5f;color:#7dd3fc;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">💰 設定固定成本</button>
+        <button onclick="cleanYuantaHistory()" style="background:#111128;border:1px solid #7f1d1d;color:#f87171;padding:9px 18px;border-radius:8px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">🗑️ 清除錯誤資料</button>
+        <input type="file" id="pdf-file-input" accept=".pdf" multiple style="display:none" onchange="handlePdfFiles(this.files)"/>
+      </div>
+      <!-- Drop zone -->
+      <div id="pdf-drop-zone" onclick="document.getElementById('pdf-file-input').click()">
+        <div style="font-size:28px">📂</div>
+        <p>拖曳元大 PDF 對帳單到這裡，或點擊選擇</p>
+        <p style="font-size:11px;margin-top:4px">支援多選，自動解密（密碼存於本次 Session）</p>
+      </div>
+      <!-- PDF progress -->
+      <div id="pdf-progress"></div>
+      <!-- Yuanta history -->
+      <div id="yuanta-history-content">
+        <div class="no-portfolio">尚無對帳單資料 · 點擊上方按鈕同步或匯入 PDF</div>
+      </div>
+    </div>
+  </div>
+
+  <footer>個人財務儀表板 · Moneybook + 元大證券 · 資料來自 Google Drive</footer>
+</div>
+</div>
+
+<!-- Sync Badge -->
+<div id="sync-badge">
+  <div class="sync-title">同步狀態</div>
+  <div id="sync-rows"></div>
+</div>
+
+<!-- Password Modal -->
+<div id="pwd-modal">
+  <div class="pwd-box">
+    <h3>🔐 PDF 解密密碼</h3>
+    <p>元大證券 PDF 對帳單需要密碼才能解析。<br/>密碼僅存於本次瀏覽器 Session，不會寫入任何地方。</p>
+    <input type="password" class="pwd-input" id="pwd-input" placeholder="輸入 PDF 密碼" autocomplete="off"/>
+    <button class="pwd-btn" onclick="confirmPwd()">確認</button>
+    <button class="btn-secondary" onclick="closePwdModal()">取消（跳過解密）</button>
+  </div>
+</div>
+
+<script src="https://accounts.google.com/gsi/client" async defer></script>
+
+<!-- Firebase module -->
+<script type="module">
+import { initializeApp } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-app.js';
+import { getAuth, createUserWithEmailAndPassword, signInWithEmailAndPassword,
+         sendPasswordResetEmail, signOut as fbSignOut
+       } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-auth.js';
+import { getFirestore, doc, setDoc, getDoc, serverTimestamp
+       } from 'https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore.js';
+
+const firebaseConfig = {
+  apiKey: "AIzaSyCfRjk1dr6HDDyTpOkgx4yUV4fv7n1iqdE",
+  authDomain: "moneybook-43a3e.firebaseapp.com",
+  projectId: "moneybook-43a3e",
+  storageBucket: "moneybook-43a3e.firebasestorage.app",
+  messagingSenderId: "949542144949",
+  appId: "1:949542144949:web:e733221a985316ef5f67fc"
+};
+const fbApp  = initializeApp(firebaseConfig);
+const fbAuth = getAuth(fbApp);
+const fbDb   = getFirestore(fbApp);
+
+// AES-GCM: CLIENT_ID/FOLDER_ID 加密存 Firestore，解密在本機
+async function deriveKey(uid, pwd){
+  const raw = new TextEncoder().encode(uid+':'+pwd);
+  const km  = await crypto.subtle.importKey('raw',raw,'PBKDF2',false,['deriveKey']);
+  return crypto.subtle.deriveKey(
+    {name:'PBKDF2',salt:new TextEncoder().encode(uid),iterations:100000,hash:'SHA-256'},
+    km,{name:'AES-GCM',length:256},false,['encrypt','decrypt']
+  );
+}
+async function aesEncrypt(text,key){
+  const iv=crypto.getRandomValues(new Uint8Array(12));
+  const enc=await crypto.subtle.encrypt({name:'AES-GCM',iv},key,new TextEncoder().encode(text));
+  return btoa(String.fromCharCode(...iv)+String.fromCharCode(...new Uint8Array(enc)));
+}
+async function aesDecrypt(b64,key){
+  const raw=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+  const dec=await crypto.subtle.decrypt({name:'AES-GCM',iv:raw.slice(0,12)},key,raw.slice(12));
+  return new TextDecoder().decode(dec);
+}
+
+function setAuthMsg(msg,color='#f87171'){
+  const el=document.getElementById('auth-msg');
+  if(el){el.textContent=msg;el.style.color=color;}
+}
+
+function showPanel(id){
+  ['panel-login','panel-register','panel-forgot','panel-cfg'].forEach(p=>{
+    const el=document.getElementById(p);
+    if(el) el.style.display=p===id?'block':'none';
+  });
+}
+window.showPanel=showPanel;
+
+window.doRegister=async function(){
+  const email=document.getElementById('reg-email').value.trim();
+  const pwd  =document.getElementById('reg-pwd').value;
+  const cid  =document.getElementById('reg-cid').value.trim();
+  const fid  =document.getElementById('reg-fid').value.trim();
+  const gkey =document.getElementById('reg-gemini').value.trim();
+  if(!email||!pwd||!cid||!fid||!gkey){setAuthMsg('請填寫所有欄位');return;}
+  if(pwd.length<6){setAuthMsg('密碼至少 6 碼');return;}
+  try{
+    setAuthMsg('建立帳號中…','#94a3b8');
+    const cred=await createUserWithEmailAndPassword(fbAuth,email,pwd);
+    const uid=cred.user.uid;
+    const key=await deriveKey(uid,pwd);
+    await setDoc(doc(fbDb,'users',uid),{
+      email, createdAt:serverTimestamp(),
+      encClientId:await aesEncrypt(cid,key),
+      encFolderId:await aesEncrypt(fid,key),
+      encGeminiKey:await aesEncrypt(gkey,key)
+    });
+    setAuthMsg('帳號建立成功！','#34d399');
+    sessionStorage.setItem('mb_cid',cid);
+    sessionStorage.setItem('mb_fid',fid);
+    sessionStorage.setItem('mb_gkey',gkey);
+    setTimeout(()=>window._launchOAuth(cid,fid),600);
+  }catch(e){
+    setAuthMsg(e.code==='auth/email-already-in-use'?'Email 已被使用':'錯誤：'+e.message);
+  }
+};
+
+window.doLogin=async function(){
+  const email=document.getElementById('login-email').value.trim();
+  const pwd  =document.getElementById('login-pwd').value;
+  const remember=document.getElementById('login-remember').checked;
+  if(!email||!pwd){setAuthMsg('請輸入帳號密碼');return;}
+  try{
+    setAuthMsg('登入中…','#94a3b8');
+    const cred=await signInWithEmailAndPassword(fbAuth,email,pwd);
+    const snap=await getDoc(doc(fbDb,'users',cred.user.uid));
+    if(!snap.exists()){setAuthMsg('找不到帳號資料');return;}
+    const key=await deriveKey(cred.user.uid,pwd);
+    const d=snap.data();
+    const cid=await aesDecrypt(d.encClientId,key);
+    const fid=await aesDecrypt(d.encFolderId,key);
+    const gkey=d.encGeminiKey?await aesDecrypt(d.encGeminiKey,key):'';
+    if(remember){
+      localStorage.setItem('mb_saved_email',email);
+      localStorage.setItem('mb_saved_pwd',pwd);
+    } else {
+      localStorage.removeItem('mb_saved_email');
+      localStorage.removeItem('mb_saved_pwd');
+    }
+    setAuthMsg('登入成功！','#34d399');
+    sessionStorage.setItem('mb_cid',cid);
+    sessionStorage.setItem('mb_fid',fid);
+    sessionStorage.setItem('mb_gkey',gkey);
+    sessionStorage.setItem('mb_email',email);
+    setTimeout(()=>window._launchOAuth(cid,fid),400);
+  }catch(e){
+    setAuthMsg(e.code==='auth/invalid-credential'?'帳號或密碼錯誤':'錯誤：'+e.message);
+  }
+};
+
+window.doForgot=async function(){
+  const email=document.getElementById('forgot-email').value.trim();
+  if(!email){setAuthMsg('請輸入 Email');return;}
+  try{
+    await sendPasswordResetEmail(fbAuth,email);
+    setAuthMsg('重設信已寄出，請檢查信箱','#34d399');
+  }catch(e){setAuthMsg('寄送失敗：'+e.message);}
+};
+
+window.fbDoSignOut=async function(){
+  sessionStorage.removeItem('mb_cid');
+  sessionStorage.removeItem('mb_fid');
+  sessionStorage.removeItem('mb_gkey');
+  sessionStorage.removeItem('mb_email');
+  try{await fbSignOut(fbAuth);}catch(e){}
+};
+
+window.doCfgLogin=function(){
+  const cid=document.getElementById('cfg-client-id').value.trim();
+  const fid=document.getElementById('cfg-folder-id').value.trim();
+  if(!cid){setAuthMsg('請輸入 OAuth Client ID');return;}
+  if(!fid){setAuthMsg('請輸入 Drive 資料夾 ID');return;}
+  window._launchOAuth(cid,fid);
+};
+
+// 自動填入已儲存帳密
+(function(){
+  const se=localStorage.getItem('mb_saved_email');
+  const sp=localStorage.getItem('mb_saved_pwd');
+  if(se&&sp){
+    const tryFill=()=>{
+      const emailEl=document.getElementById('login-email');
+      const pwdEl=document.getElementById('login-pwd');
+      const remEl=document.getElementById('login-remember');
+      if(emailEl&&pwdEl){
+        emailEl.value=se;pwdEl.value=sp;
+        if(remEl)remEl.checked=true;
+      } else setTimeout(tryFill,100);
+    };
+    tryFill();
+  }
+})();
+
+// Update credentials for logged-in user
+window.fbUpdateCredentials=async function(pwd,cid,fid,gkey){
+  // 從 sessionStorage 取 email（doLogin 時已存）
+  const email=sessionStorage.getItem('mb_email')||'';
+  if(!email){return{ok:false,msg:'找不到登入 Email，請重新登入'};}
+  try{
+    // 重新驗證取得 uid
+    const cred=await signInWithEmailAndPassword(fbAuth,email,pwd);
+    const uid=cred.user.uid;
+    const key=await deriveKey(uid,pwd);
+    const snap=await getDoc(doc(fbDb,'users',uid));
+    if(!snap.exists()){return{ok:false,msg:'找不到帳號資料'};}
+    const updates={};
+    if(cid) updates.encClientId=await aesEncrypt(cid,key);
+    if(fid) updates.encFolderId=await aesEncrypt(fid,key);
+    if(gkey) updates.encGeminiKey=await aesEncrypt(gkey,key);
+    await setDoc(doc(fbDb,'users',uid),updates,{merge:true});
+    if(cid) sessionStorage.setItem('mb_cid',cid);
+    if(fid) sessionStorage.setItem('mb_fid',fid);
+    if(gkey) sessionStorage.setItem('mb_gkey',gkey);
+    return{ok:true};
+  }catch(e){
+    return{ok:false,msg:e.code==='auth/invalid-credential'?'密碼錯誤':e.message};
+  }
+};
+</script>
+
+<script>
+// ── Config ────────────────────────────────────────────────
+const SCOPES = 'https://www.googleapis.com/auth/drive https://www.googleapis.com/auth/gmail.readonly openid email profile';
+window._SCOPES = SCOPES;  // expose for Firebase module
+const YUANTA_SENDER  = 'ebillservice@bhu.yuanta.com.tw';
+const YUANTA_SUBJECT = '元大證券電子綜合月對帳單';
+const PDF_PWD_KEY    = 'yuanta_pdf_pwd';
+
+// Runtime config — populated by _launchOAuth callback
+let CLIENT_ID = '', FOLDER_ID = '', accessToken = null;
+let GEMINI_API_KEY = sessionStorage.getItem('mb_gkey')||'';
+
+// Bridge: Firebase module calls window._launchOAuth(cid,fid)
+window._launchOAuth = function(cid, fid){
+  CLIENT_ID = cid;
+  FOLDER_ID = fid;
+  GEMINI_API_KEY = sessionStorage.getItem('mb_gkey')||'';
+  document.getElementById('auth-screen').style.display='none';
+  document.getElementById('loading-screen').style.display='flex';
+  const tryInit=()=>{
+    if(window.google?.accounts?.oauth2){
+      const c=google.accounts.oauth2.initTokenClient({
+        client_id:cid, scope:SCOPES,
+        callback:async r=>{
+          if(r.error){
+            alert('Google 登入失敗：'+r.error);
+            document.getElementById('auth-screen').style.display='flex';
+            document.getElementById('loading-screen').style.display='none';
+            return;
+          }
+          accessToken=r.access_token;
+          await loadAll();
+        }
+      });
+      c.requestAccessToken();
+    } else { setTimeout(tryInit,200); }
+  };
+  tryInit();
+};
+
+// PDF.js worker
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+
+// ── State ─────────────────────────────────────────────────
+let allData = {}, portfolio = null, yuantaHistory = null;
+let pwdResolve = null;
+
+
+
+// ── Auth ──────────────────────────────────────────────────
+function signIn(){ /* legacy no-op; kept so old references don't throw */ }
+function signOut(){
+  accessToken=null;
+  sessionStorage.removeItem(PDF_PWD_KEY);
+  if(window.fbDoSignOut) window.fbDoSignOut();
+  document.getElementById('dashboard').style.display='none';
+  document.getElementById('auth-screen').style.display='flex';
+  // Reset to login panel
+  if(window.showPanel) window.showPanel('panel-login');
+}
+
+// ── Loading Steps ─────────────────────────────────────────
+function initSteps(s){document.getElementById('load-steps').innerHTML=s.map(x=>`<div class="load-step">○ ${x}</div>`).join('')}
+function setStep(steps,i,state){const el=document.querySelectorAll('#load-steps .load-step')[i];if(!el)return;el.className='load-step '+state;el.textContent=(state==='done'?'✓ ':state==='active'?'⟳ ':'○ ')+steps[i]}
+
+// ── Drive helpers ─────────────────────────────────────────
+async function driveGet(url){
+  const r=await fetch(url,{headers:{Authorization:'Bearer '+accessToken}});
+  return r.json();
+}
+async function driveGetFile(id){
+  const r=await fetch(`https://www.googleapis.com/drive/v3/files/${id}?alt=media`,{headers:{Authorization:'Bearer '+accessToken}});
+  return r;
+}
+async function driveUploadJson(filename, data, existingId=null){
+  const body=JSON.stringify(data,null,2);
+  const blob=new Blob([body],{type:'application/json'});
+  let url, method;
+  if(existingId){
+    url=`https://www.googleapis.com/upload/drive/v3/files/${existingId}?uploadType=multipart`;
+    method='PATCH';
+  } else {
+    url='https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart';
+    method='POST';
+  }
+  const meta={name:filename,...(!existingId?{parents:[FOLDER_ID]}:{})};
+  const form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+  form.append('file',blob);
+  const r=await fetch(url,{method,headers:{Authorization:'Bearer '+accessToken},body:form});
+  return r.json();
+}
+async function driveUploadBinary(filename, arrayBuffer, mimeType, parentId=FOLDER_ID){
+  // Find or create Yuanta_PDF subfolder
+  let folderId=parentId;
+  const meta={name:filename,parents:[folderId]};
+  const blob=new Blob([arrayBuffer],{type:mimeType});
+  const form=new FormData();
+  form.append('metadata',new Blob([JSON.stringify(meta)],{type:'application/json'}));
+  form.append('file',blob);
+  const r=await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart',
+    {method:'POST',headers:{Authorization:'Bearer '+accessToken},body:form});
+  return r.json();
+}
+async function getOrCreateSubfolder(name, parentId){
+  const q=`name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`;
+  const res=await driveGet(`https://www.googleapis.com/drive/v3/files?q=${encodeURIComponent(q)}&fields=files(id,name)`);
+  if(res.files&&res.files.length>0)return res.files[0].id;
+  // create
+  const r=await fetch('https://www.googleapis.com/drive/v3/files',{
+    method:'POST',headers:{Authorization:'Bearer '+accessToken,'Content-Type':'application/json'},
+    body:JSON.stringify({name,mimeType:'application/vnd.google-apps.folder',parents:[parentId]})
+  });
+  const d=await r.json();
+  return d.id;
+}
+
+// ── Load All ──────────────────────────────────────────────
+async function loadAll(){
+  const steps=['連接 Google Drive','下載消費明細 CSV','下載持股資料','下載對帳單歷史','解析 & 建立圖表','同步國泰日報','同步元大對帳單'];
+  initSteps(steps);
+
+  setStep(steps,0,'active');
+  const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+trashed=false&fields=files(id,name,modifiedTime)&orderBy=modifiedTime+desc`);
+  const files=list.files||[];
+  try{
+    const p=await driveGet('https://www.googleapis.com/drive/v3/about?fields=user');
+    if(p.user){
+      document.getElementById('user-name').textContent=p.user.emailAddress||'';
+      document.getElementById('user-avatar').src=p.user.photoLink||'';
+    }
+  }catch(e){}
+  setStep(steps,0,'done');
+
+  setStep(steps,1,'active');
+  const csvFile=files.find(f=>f.name.includes('明細')&&f.name.endsWith('.csv'));
+  let csvText='';
+  if(csvFile){
+    const r=await driveGetFile(csvFile.id);
+    csvText=await r.text();
+  }
+  setStep(steps,1,'done');
+
+  setStep(steps,2,'active');
+  const pfFile=files.find(f=>f.name==='portfolio.json');
+  if(pfFile){
+    const r=await driveGetFile(pfFile.id);
+    try{
+      const pf=await r.json();
+      // 驗證：必須有 holdings 陣列且 updated 為 YYYY-MM-DD 格式
+      const validDate=/^\d{4}-\d{2}-\d{2}$/.test(pf?._meta?.updated||'');
+      const validHoldings=Array.isArray(pf?.holdings);
+      portfolio=(validDate&&validHoldings)?pf:null;
+      if(!portfolio) console.warn('portfolio.json 驗證失敗，將重新同步');
+    }catch(e){portfolio=null;}
+  }
+  setStep(steps,2,'done');
+
+  setStep(steps,3,'active');
+  const yhFile=files.find(f=>f.name==='yuanta_history.json');
+  if(yhFile){
+    const r=await driveGetFile(yhFile.id);
+    try{
+      const yh=await r.json();
+      yuantaHistory=(yh?.months&&typeof yh.months==='object')?yh:null;
+    }catch(e){yuantaHistory=null;}
+  }
+  setStep(steps,3,'done');
+
+  setStep(steps,4,'active');
+  if(csvText){
+    const rows=Papa.parse(csvText,{header:true,skipEmptyLines:true}).data;
+    allData=processData(rows,csvFile?.name,csvFile?.modifiedTime);
+  }
+  renderDashboard();
+  setStep(steps,4,'done');
+
+  // ── Step 5：自動同步國泰日報（portfolio 無效或非今日才觸發）
+  const today=new Date().toISOString().slice(0,10);
+  const pfUpdated=portfolio?._meta?.updated||'';
+  const pfValid=/^\d{4}-\d{2}-\d{2}$/.test(pfUpdated);
+  if(!pfValid||pfUpdated!==today){
+    setStep(steps,5,'active');
+    try{
+      await autoSyncKgiSilent();
+      setStep(steps,5,'done');
+    }catch(e){
+      setStep(steps,5,'err');
+      console.warn('Auto KGI sync failed:',e);
+    }
+  } else {
+    setStep(steps,5,'done');
+  }
+
+  // ── Step 6：自動同步元大對帳單（有新月份才觸發）─────────
+  setStep(steps,6,'active');
+  try{
+    const newCount=await autoSyncYuantaSilent();
+    setStep(steps,6, newCount>0 ? 'done' : 'done');
+  }catch(e){
+    setStep(steps,6,'err');
+    console.warn('Auto Yuanta sync failed:',e);
+  }
+
+  setTimeout(()=>{
+    document.getElementById('loading-screen').style.display='none';
+    document.getElementById('dashboard').style.display='block';
+  },400);
+}
+
+// ── Data Processing ───────────────────────────────────────
+const EXCLUDE=['繳信用卡費','帳戶互轉','電子票證加值','還款','薪資','投資買賣','外幣買賣','轉定存'];
+const LIFESTYLE_X=['家用費'];
+const fmtN=n=>'NT$'+Number(n).toLocaleString();
+const fmtK=n=>n>=1000000?(n/1000000).toFixed(1)+'M':n>=1000?(n/1000).toFixed(0)+'k':String(Math.round(n));
+const CAT_COLORS=['#6366f1','#f97316','#06b6d4','#ec4899','#34d399','#fbbf24','#a78bfa','#f43f5e','#64748b','#0ea5e9'];
+
+function processData(rows,fname,modTime){
+  let txns=rows.map(r=>({
+    date:new Date(r['消費日']||r['日期']),
+    amount:parseFloat(String(r['金額']).replace(/,/g,''))||0,
+    cat:(r['分類']||'尚未分類').trim(),
+    desc:(r['明細描述']||r['備註']||'').trim(),
+    currency:(r['幣別']||'TWD').trim()
+  })).filter(r=>r.date&&!isNaN(r.date)&&r.amount<0&&r.currency==='TWD');
+  txns=txns.map(r=>({...r,amount:Math.abs(r.amount)}));
+  const seen=new Set();
+  txns=txns.filter(r=>{const k=`${r.date.toISOString().slice(0,10)}_${r.amount}_${r.desc}`;if(seen.has(k))return false;seen.add(k);return true});
+  const real=txns.filter(r=>!EXCLUDE.includes(r.cat));
+  const byYear={};
+  real.forEach(r=>{
+    const y=r.date.getFullYear();
+    if(!byYear[y])byYear[y]={total:0,txns:0,cats:{},lifestyle:0,byMonth:{}};
+    byYear[y].total+=r.amount;byYear[y].txns++;
+    byYear[y].cats[r.cat]=(byYear[y].cats[r.cat]||0)+r.amount;
+    if(!LIFESTYLE_X.includes(r.cat))byYear[y].lifestyle+=r.amount;
+    const m=r.date.getMonth()+1;
+    byYear[y].byMonth[m]=(byYear[y].byMonth[m]||0)+r.amount;
+  });
+  const byYM={};
+  real.forEach(r=>{const k=`${r.date.getFullYear()}-${String(r.date.getMonth()+1).padStart(2,'0')}`;byYM[k]=(byYM[k]||0)+r.amount});
+  const allCats={};
+  real.forEach(r=>{allCats[r.cat]=(allCats[r.cat]||0)+r.amount});
+  const curYear=new Date().getFullYear();
+  const yearData=byYear[curYear]||{total:0,txns:0,byMonth:{}};
+  const months=Object.keys(yearData.byMonth||{});
+  const monthCount=months.length||1;
+  const latestMonth=Math.max(...months.map(Number));
+  const latestAmt=(yearData.byMonth||{})[latestMonth]||0;
+  return{byYear,byYM,allCats,real,totalTxns:txns.length,curYear,yearData,monthCount,latestMonth,latestAmt,fname,modTime};
+}
+
+// ── Render Dashboard ──────────────────────────────────────
+let chartInstances={};
+function destroyChart(id){if(chartInstances[id]){chartInstances[id].destroy();delete chartInstances[id]}}
+function makeChart(id,config){destroyChart(id);const ctx=document.getElementById(id).getContext('2d');chartInstances[id]=new Chart(ctx,config)}
+const MONTHS_LABEL=['','1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
+
+function renderDashboard(){
+  const d=allData;
+  const modDate=d.modTime?new Date(d.modTime).toLocaleDateString('zh-TW'):'—';
+  const pfDate=portfolio?._meta?.updated||'—';
+  document.getElementById('meta-line').textContent=`消費：${d.fname||'—'} (${modDate}) · 持股：${pfDate}`;
+  if(d.latestMonth){
+    document.getElementById('stat-latest').textContent=fmtK(d.latestAmt);
+    document.getElementById('stat-latest-sub').textContent=`${d.curYear} 年 ${MONTHS_LABEL[d.latestMonth]}`;
+    document.getElementById('stat-ytd').textContent=fmtK(d.yearData.total);
+    document.getElementById('stat-ytd-sub').textContent=`${d.curYear} 年前 ${d.monthCount} 個月`;
+  }
+  if(portfolio){
+    document.getElementById('stat-stocks').textContent=portfolio.holdings.length+' 檔';
+    document.getElementById('stat-stocks-sub').textContent=portfolio._meta.account||'';
+    const t=portfolio.market,up=t.taiex_change>=0;
+    document.getElementById('stat-taiex').textContent=t.taiex.toLocaleString();
+    document.getElementById('stat-taiex').style.color=up?'#f87171':'#34d399';
+    document.getElementById('stat-taiex-sub').textContent=`${up?'▲':'▼'} ${Math.abs(t.taiex_change_pct)}% (${t.date})`;
+  }
+  if(d.byYear)renderTrend(d);
+  if(d.byYM)renderHeatmap(d);
+  if(d.allCats)renderCats(d);
+  if(d.byYear)renderMonthly(d);
+  renderPortfolio();
+  renderYuantaHistory();
+  if(d.byYear)renderInsight(d);
+  loadMarketTicker();
+}
+
+function renderTrend(d){
+  const years=Object.keys(d.byYear).sort();
+  const gc='#1e293b',tc='#64748b';
+  makeChart('chart-annual',{type:'bar',data:{labels:years,datasets:[{data:years.map(y=>Math.round(d.byYear[y].total)),backgroundColor:years.map(y=>y==d.curYear?'#6366f1':'#1e3a5f'),borderRadius:6,borderSkipped:false}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtN(c.raw)}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+  const lsY=years.filter(y=>d.byYear[y].lifestyle>0);
+  makeChart('chart-lifestyle',{type:'line',data:{labels:lsY,datasets:[{data:lsY.map(y=>d.byYear[y].lifestyle),borderColor:'#6366f1',backgroundColor:'#6366f120',fill:true,tension:0.4,pointRadius:5,pointBackgroundColor:'#6366f1'}]},options:{plugins:{legend:{display:false},tooltip:{callbacks:{label:c=>fmtN(c.raw)}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+  const fsY=years.filter(y=>parseInt(y)>=2022);
+  makeChart('chart-food-shop',{type:'bar',data:{labels:fsY,datasets:[{label:'飲食',data:fsY.map(y=>Math.round(d.byYear[y]?.cats?.['飲食']||0)),backgroundColor:'#f9741688',borderRadius:4},{label:'購物',data:fsY.map(y=>Math.round((d.byYear[y]?.cats?.['購物']||0)+(d.byYear[y]?.cats?.['服飾']||0))),backgroundColor:'#06b6d488',borderRadius:4}]},options:{plugins:{legend:{labels:{color:'#94a3b8'}},tooltip:{callbacks:{label:c=>`${c.dataset.label}: ${fmtN(c.raw)}`}}},scales:{x:{grid:{display:false},ticks:{color:tc}},y:{grid:{color:gc},ticks:{color:tc,callback:v=>fmtK(v)}}}}});
+}
+
+function renderHeatmap(d){
+  const years=Object.keys(d.byYear).map(Number).sort();
+  const max=Math.max(...Object.values(d.byYM),1);
+  function heatColor(v){if(!v)return'#0d0d1f';const p=Math.min(v/max,1);if(p<.15)return'#1e3a5f22';if(p<.35)return'#1e3a5f66';if(p<.55)return'#2563eb88';if(p<.75)return'#3b82f6bb';return'#60a5fa'}
+  const cont=document.getElementById('heatmap-container');
+  let html='<div style="min-width:560px"><div style="display:grid;grid-template-columns:44px repeat(12,1fr);gap:4px;margin-bottom:6px"><div></div>';
+  for(let m=1;m<=12;m++)html+=`<div class="hm-header">${m}月</div>`;
+  html+='</div>';
+  years.forEach(y=>{
+    html+=`<div style="display:grid;grid-template-columns:44px repeat(12,1fr);gap:4px;margin-bottom:4px"><div class="hm-label">${y}</div>`;
+    for(let m=1;m<=12;m++){const k=`${y}-${String(m).padStart(2,'0')}`;const v=d.byYM[k]||0;html+=`<div class="heatmap-cell" style="background:${heatColor(v)};color:${v>100000?'#bfdbfe':'transparent'}" title="${v?`${y}/${m}: ${fmtN(v)}`:`${y}/${m}: 無資料`}">${v>50000?fmtK(v):''}</div>`}
+    html+='</div>';
+  });
+  html+='</div>';
+  cont.innerHTML=html;
+  const leg=document.getElementById('heatmap-legend');
+  leg.innerHTML='';
+  [.1,.3,.5,.7,.95].forEach(p=>{const el=document.createElement('div');el.style.cssText=`width:28px;height:16px;border-radius:4px;background:${heatColor(p*max)}`;leg.appendChild(el)});
+  const sorted=Object.entries(d.byYM).sort((a,b)=>b[1]-a[1]).slice(0,8);
+  document.getElementById('peak-list').innerHTML=sorted.map(([ym,amt],i)=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:10px 0;border-bottom:1px solid var(--border)"><div style="display:flex;align-items:center;gap:10px"><div style="width:24px;height:24px;background:var(--dim);border-radius:6px;display:flex;align-items:center;justify-content:center;color:var(--muted);font-size:11px;font-family:'Space Mono',monospace">${String(i+1).padStart(2,'0')}</div><span style="color:var(--text);font-family:'Space Mono',monospace;font-size:14px">${ym}</span></div><span style="color:#f97316;font-weight:700;font-size:14px;font-family:'Space Mono',monospace">${fmtN(Math.round(amt))}</span></div>`).join('');
+}
+
+function renderCatBars(cats,container){
+  const sorted=Object.entries(cats).sort((a,b)=>b[1]-a[1]).slice(0,12);
+  const max=sorted[0]?.[1]||1,total=sorted.reduce((s,[,v])=>s+v,0);
+  container.innerHTML=sorted.map(([name,val],i)=>`<div class="bar-row"><div class="bar-row-label"><span>${name}</span><span>${fmtN(Math.round(val))} <span style="color:var(--muted);font-size:11px">${(val/total*100).toFixed(1)}%</span></span></div><div class="bar-track"><div class="bar-fill" style="width:${(val/max*100).toFixed(1)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('');
+}
+
+function renderCats(d){
+  renderCatBars(d.allCats,document.getElementById('cat-bars-all'));
+  const years=Object.keys(d.byYear).sort().reverse();
+  document.getElementById('year-sel').innerHTML=years.map(y=>`<button class="month-btn ${y==d.curYear?'active':''}" onclick="selectYear(${y},event)">${y}</button>`).join('');
+  window.selectYear=function(y,e){document.querySelectorAll('#year-sel .month-btn').forEach(b=>b.classList.remove('active'));e.target.classList.add('active');renderCatBars(d.byYear[y]?.cats||{},document.getElementById('cat-bars-year'))};
+  renderCatBars(d.byYear[d.curYear]?.cats||{},document.getElementById('cat-bars-year'));
+}
+
+function renderMonthly(d){
+  const years=Object.keys(d.byYear).sort().reverse();
+  const ySel=document.getElementById('month-year-sel');
+  ySel.innerHTML=years.map(y=>`<option value="${y}">${y} 年</option>`).join('');
+  function updateMSel(){const y=parseInt(ySel.value);const months=Object.keys(d.byYear[y]?.byMonth||{}).map(Number).sort().reverse();document.getElementById('month-mon-sel').innerHTML=months.map(m=>`<option value="${m}">${m} 月</option>`).join('');updateDetail()}
+  function updateDetail(){
+    const y=parseInt(ySel.value),m=parseInt(document.getElementById('month-mon-sel').value);
+    const amt=(d.byYear[y]?.byMonth||{})[m]||0;
+    const txns=d.real.filter(r=>r.date.getFullYear()===y&&r.date.getMonth()+1===m).sort((a,b)=>b.amount-a.amount);
+    const cats={};txns.forEach(r=>{cats[r.cat]=(cats[r.cat]||0)+r.amount});
+    document.getElementById('monthly-content').innerHTML=`<div style="display:flex;gap:16px;margin-bottom:20px;flex-wrap:wrap"><div style="background:var(--dim);border-radius:10px;padding:14px 20px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">總消費</div><div style="color:#6366f1;font-size:22px;font-weight:900;font-family:'Space Mono',monospace">${fmtN(Math.round(amt))}</div></div><div style="background:var(--dim);border-radius:10px;padding:14px 20px"><div style="color:var(--muted);font-size:11px;margin-bottom:4px">筆數</div><div style="color:#06b6d4;font-size:22px;font-weight:900;font-family:'Space Mono',monospace">${txns.length}</div></div></div><div style="margin-bottom:20px"><div style="color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:12px">類別</div>${Object.entries(cats).sort((a,b)=>b[1]-a[1]).map(([c,v],i)=>`<div class="bar-row"><div class="bar-row-label"><span>${c}</span><span>${fmtN(Math.round(v))} <span style="color:var(--muted);font-size:11px">${(v/amt*100).toFixed(1)}%</span></span></div><div class="bar-track"><div class="bar-fill" style="width:${(v/Math.max(...Object.values(cats))*100).toFixed(1)}%;background:${CAT_COLORS[i%CAT_COLORS.length]}"></div></div></div>`).join('')}</div><div><div style="color:var(--muted);font-size:11px;letter-spacing:2px;text-transform:uppercase;font-family:'Space Mono',monospace;margin-bottom:12px">TOP 15 消費</div>${txns.slice(0,15).map(r=>`<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--border)"><div><div style="font-size:13px;color:var(--text)">${r.desc||r.cat}</div><div style="font-size:11px;color:var(--muted)">${r.date.toLocaleDateString('zh-TW')} · ${r.cat}</div></div><div style="font-weight:700;font-size:13px;font-family:'Space Mono',monospace;color:#7dd3fc">${fmtN(Math.round(r.amount))}</div></div>`).join('')}</div>`;
+  }
+  ySel.onchange=updateMSel;document.getElementById('month-mon-sel').onchange=updateDetail;updateMSel();
+}
+
+function renderPortfolio(){
+  if(!portfolio){document.getElementById('portfolio-content').innerHTML='<div class="no-portfolio">⚠️ 找不到 portfolio.json，請將檔案上傳至 Google Drive Moneybook 資料夾。</div>';return}
+  const m=portfolio.market,up=m.taiex_change>=0;
+  document.getElementById('market-bar').innerHTML=`
+    <div class="mbar-item"><div class="mbar-label">加權指數</div><div class="mbar-val" style="color:${up?'#f87171':'#34d399'}">${m.taiex.toLocaleString()}</div><div style="color:${up?'#f87171':'#34d399'};font-size:12px;margin-top:4px">${up?'▲':'▼'} ${Math.abs(m.taiex_change)} (${m.taiex_change_pct}%)</div></div>
+    <div class="mbar-item"><div class="mbar-label">成交金額</div><div class="mbar-val" style="color:#94a3b8">${m.volume_b.toLocaleString()}億</div></div>
+    <div class="mbar-item"><div class="mbar-label">資料日期</div><div class="mbar-val" style="color:#64748b;font-size:16px">${m.date}</div></div>`;
+  const signalClass=s=>{
+    if(s.includes('買超')||s.includes('新高')||s.includes('毛利')||s.includes('營益'))return'signal-good';
+    if(s.includes('死亡')||s.includes('賣超')||s.includes('翻黑'))return'signal-warn';
+    return'signal-neu';
+  };
+  document.getElementById('portfolio-content').innerHTML=portfolio.holdings.map(h=>{
+    const up=h.change>0,dn=h.change<0;
+    const cls=up?'up':dn?'down':'flat',arrow=up?'▲':dn?'▼':'';
+    const events=h.events.map(e=>`<div class="event-badge">🔔 ${e.type} ${e.date} · 配息 ${e.dividend}元 · 預估入帳 NT$${e.estimated_income} · 發放 ${e.pay_date}</div>`).join('');
+    const signals=h.signals.map(s=>`<span class="signal-tag ${signalClass(s)}">${s}</span>`).join('');
+    const report=h.report?`<div style="color:#64748b;font-size:12px;margin-top:8px;font-style:italic">📋 ${h.report}</div>`:'';
+    return`<div class="stock-card">
+      <div class="stock-header">
+        <div><div class="stock-name">${h.name}</div><div class="stock-code">${h.code} · ${h.broker}</div></div>
+        <div class="stock-price"><div class="price ${cls}">${h.price.toLocaleString()}</div><div class="chg ${cls}">${arrow} ${Math.abs(h.change)} (${Math.abs(h.change_pct)}%)</div><div style="color:var(--muted);font-size:11px;margin-top:2px">量 ${h.volume.toLocaleString()} 張</div></div>
+      </div>${events}<div class="signals">${signals}</div>${report}</div>`;
+  }).join('');
+  const warns=portfolio.holdings.flatMap(h=>h.signals.filter(s=>s.includes('死亡')||s.includes('翻黑')||s.includes('賣超')));
+  const goods=portfolio.holdings.flatMap(h=>h.signals.filter(s=>s.includes('買超')||s.includes('新高')));
+  document.getElementById('portfolio-insight').innerHTML=`<div class="insight-title">💡 投資組合洞察</div>
+    <div class="insight-row"><span style="font-size:18px">📊</span><p>持有 <strong>${portfolio.holdings.length} 檔</strong>（${portfolio._meta.account}），資料更新至 <strong>${portfolio.market.date}</strong>。</p></div>
+    ${warns.length?`<div class="insight-row"><span style="font-size:18px">⚠️</span><p>本日有 <strong style="color:#f87171">${warns.length} 個警示訊號</strong>，包含 KD 死亡交叉與主力賣超，建議留意短線風險。</p></div>`:''}
+    ${goods.length?`<div class="insight-row"><span style="font-size:18px">✅</span><p>有 <strong style="color:#34d399">${goods.length} 個正向訊號</strong>。</p></div>`:''}
+    <div class="insight-row"><span style="font-size:18px">🔄</span><p>每次收到國泰 AI投資日報後，讓 Claude 更新 <strong>portfolio.json</strong> 並上傳至 Drive，下次開啟即自動同步。</p></div>`;
+}
+
+function renderInsight(d){
+  const years=Object.keys(d.byYear).map(Number).sort();
+  const lastY=years[years.length-1],prevY=years[years.length-2];
+  const diff=prevY?Math.round((d.byYear[lastY].lifestyle-d.byYear[prevY].lifestyle)/d.byYear[prevY].lifestyle*100):0;
+  const topCat=Object.entries(d.byYear[lastY]?.cats||{}).sort((a,b)=>b[1]-a[1])[0];
+  document.getElementById('insight-box').innerHTML=`<div class="insight-title">💡 消費洞察</div>
+    <div class="insight-row"><span style="font-size:18px">📅</span><p>資料涵蓋 <strong>${years[0]}–${lastY}</strong>，共 <strong>${d.totalTxns.toLocaleString()} 筆</strong>交易。</p></div>
+    <div class="insight-row"><span style="font-size:18px">${diff>0?'📈':'📉'}</span><p>${lastY} 年生活支出相比 ${prevY} 年<strong style="color:${diff>0?'#f87171':'#34d399'}">${diff>0?'增加':'減少'} ${Math.abs(diff)}%</strong>。</p></div>
+    <div class="insight-row"><span style="font-size:18px">🏆</span><p>${lastY} 年最大消費類別：<strong>${topCat?.[0]||'—'}</strong>（${fmtN(Math.round(topCat?.[1]||0))}）。</p></div>`;
+}
+
+// ── 盤前資訊（Yahoo Finance API）────────────────────────────
+async function loadMarketTicker(){
+  // 抓加權指數(^TWII)、持股代號
+  const codes=['^TWII'];
+  if(portfolio?.holdings) portfolio.holdings.forEach(h=>{
+    // Yahoo Finance TW 股票格式：代號.TW 或 .TWO
+    codes.push(h.code+'.TW');
+  });
+  const symbols=codes.join(',');
+  try{
+    const url=`https://query1.finance.yahoo.com/v7/finance/quote?symbols=${encodeURIComponent(symbols)}&fields=symbol,shortName,regularMarketPrice,regularMarketChange,regularMarketChangePercent,regularMarketTime&lang=zh-TW&region=TW`;
+    const r=await fetch(url);
+    const d=await r.json();
+    const quotes=d.quoteResponse?.result||[];
+    if(!quotes.length) return;
+
+    const tickerEl=document.getElementById('ticker-content');
+    const timeEl=document.getElementById('ticker-time');
+    const ticker=document.getElementById('market-ticker');
+
+    const items=quotes.map(q=>{
+      const up=q.regularMarketChange>=0;
+      const cls=up?'#f87171':'#34d399';
+      const arrow=up?'▲':'▼';
+      const name=q.shortName||q.symbol;
+      const time=q.regularMarketTime?new Date(q.regularMarketTime*1000).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}):'';
+      return`<div style="display:flex;flex-direction:column;gap:2px;min-width:80px">
+        <div style="font-size:10px;color:var(--muted);font-family:'Space Mono',monospace">${name.slice(0,8)}</div>
+        <div style="font-size:16px;font-weight:900;color:${cls};font-family:'Space Mono',monospace">${q.regularMarketPrice?.toLocaleString()}</div>
+        <div style="font-size:11px;color:${cls}">${arrow}${Math.abs(q.regularMarketChange||0).toFixed(2)} (${Math.abs(q.regularMarketChangePercent||0).toFixed(2)}%)</div>
+      </div>`;
+    });
+
+    tickerEl.innerHTML=items.join('<div style="width:1px;background:var(--border);align-self:stretch"></div>');
+    const lastTime=quotes[0]?.regularMarketTime;
+    if(lastTime) timeEl.textContent='更新 '+new Date(lastTime*1000).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'});
+    ticker.style.display='block';
+  }catch(e){console.warn('Market ticker failed:',e);}
+}
+
+
+function switchTab(name,e){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(p=>p.classList.remove('active'));
+  e.target.classList.add('active');
+  document.getElementById('tab-'+name).classList.add('active');
+}
+
+// ── Sync Badge ────────────────────────────────────────────
+let syncItems={};
+function syncShow(){document.getElementById('sync-badge').classList.add('visible')}
+function syncHide(){setTimeout(()=>document.getElementById('sync-badge').classList.remove('visible'),2000)}
+function syncSet(key,text,state){
+  syncItems[key]={text,state};
+  const rows=document.getElementById('sync-rows');
+  rows.innerHTML=Object.entries(syncItems).map(([k,{text,state}])=>{
+    const icon=state==='done'?'✓':state==='err'?'✗':state==='active'?'<div class="sync-spinner"></div>':'○';
+    return`<div class="sync-row ${state}">${typeof icon==='string'?icon:icon.outerHTML||'<div class="sync-spinner"></div>'} ${text}</div>`;
+  }).join('');
+  // Re-inject spinner DOM (innerHTML strips)
+  rows.querySelectorAll('.sync-row.active').forEach(el=>{
+    if(!el.querySelector('.sync-spinner')){
+      const sp=document.createElement('div');sp.className='sync-spinner';
+      el.insertBefore(sp,el.firstChild);
+      el.childNodes.forEach((n,i)=>{if(i>0&&n.nodeType===3&&n.textContent.includes('○'))n.remove()});
+    }
+  });
+}
+function syncSetState(key,state){if(syncItems[key])syncItems[key].state=state;syncSet(key,syncItems[key]?.text||'',state)}
+
+// ── Password Modal ────────────────────────────────────────
+function askPwd(){
+  return new Promise(resolve=>{
+    pwdResolve=resolve;
+    const stored=sessionStorage.getItem(PDF_PWD_KEY);
+    if(stored){resolve(stored);return}
+    document.getElementById('pwd-modal').classList.add('visible');
+    setTimeout(()=>document.getElementById('pwd-input').focus(),100);
+  });
+}
+function confirmPwd(){
+  const v=document.getElementById('pwd-input').value.trim();
+  if(!v){alert('請輸入密碼');return}
+  sessionStorage.setItem(PDF_PWD_KEY,v);
+  document.getElementById('pwd-modal').classList.remove('visible');
+  document.getElementById('pwd-input').value='';
+  if(pwdResolve){pwdResolve(v);pwdResolve=null}
+}
+function closePwdModal(){
+  document.getElementById('pwd-modal').classList.remove('visible');
+  if(pwdResolve){pwdResolve(null);pwdResolve=null}
+}
+document.getElementById('pwd-input').addEventListener('keydown',e=>{if(e.key==='Enter')confirmPwd()});
+
+// ── PDF Parsing ───────────────────────────────────────────
+async function parsePdf(arrayBuffer, password){
+  const loadingTask=pdfjsLib.getDocument({
+    data:arrayBuffer,
+    password:password||undefined
+  });
+  const pdf=await loadingTask.promise;
+  const numPages=pdf.numPages;
+  let fullText='';
+  for(let i=1;i<=numPages;i++){
+    const page=await pdf.getPage(i);
+    const content=await page.getTextContent();
+    const lines=content.items.map(item=>item.str).join(' ');
+    fullText+=lines+'\n';
+  }
+  return fullText;
+}
+
+function extractYuantaData(text, filename){
+  console.log('[YuantaPDF] raw text (800):\n', text.slice(0,800));
+  // 月份
+  let month='';
+  const mMatch=filename.match(/(\d{6})/);
+  if(mMatch)month=mMatch[1];
+  if(!month){const tm=text.match(/(\d{4})年\s*(\d{1,2})月/);if(tm)month=`${tm[1]}${tm[2].padStart(2,'0')}`}
+
+  // 市值 — 支援「市值 375,389」和「375,389 市值」兩種方向，>10000
+  let marketValue=0;
+  const mvPatterns=[
+    /(?:總?市值|持股市值|資產總額|股票市值)[^\d\n]{0,10}([\d,]+)/g,
+    /([\d,]+)[^\d\n]{0,6}(?:總?市值|持股市值)/g
+  ];
+  for(const pat of mvPatterns){
+    const all=[...text.matchAll(pat)];
+    if(all.length){const vals=all.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length){marketValue=Math.max(...vals);break;}}
+  }
+
+  // 成本 — 支援「成本 316,477」和「316,477 成本」，>10000
+  let cost=0;
+  const costPatterns=[
+    /(?:買進|持股|原始|參考|投資)?成本[^\d\n]{0,10}([\d,]+)/g,
+    /([\d,]+)[^\d\n]{0,6}(?:買進|持股|原始|參考)?成本/g
+  ];
+  for(const pat of costPatterns){
+    const all=[...text.matchAll(pat)];
+    if(all.length){const vals=all.map(m=>parseInt(m[1].replace(/,/g,''))).filter(v=>v>10000);if(vals.length){cost=Math.max(...vals);break;}}
+  }
+
+  // 損益 — 支援括號負數（全/半形）、前置負號、正數
+  let pnl=0;
+  const pnlM=
+    text.match(/(?:未實現|評估)?損益[^\d\n(（]{0,6}[（(]([\d,]+)[）)]/) ||  // 負：(58,912)
+    text.match(/([\d,]+)[^\d\n]{0,6}(?:未實現)?損益[^\d\n]{0,6}[（(]/) ||   // 負：數字在前
+    text.match(/(?:未實現|評估)?損益[^\d\n]{0,6}(-[\d,]+)/) ||              // 負號
+    text.match(/(?:未實現|評估)?損益[^\d\n]{0,6}([\d,]+)/);                 // 正數
+  if(pnlM){
+    const raw=pnlM[1].replace(/,/g,'');
+    // 判斷是否為括號負數（原始 match 含括號）
+    pnl=pnlM[0].includes('(')||pnlM[0].includes('（') ? -parseInt(raw) : parseInt(raw);
+  }
+
+  // Holdings — 以股票代號去重（修正大魯閣等重複顯示問題）
+  const holdingsMap={};
+  const holdingRegex=/\b([0-9]{4})\b\s+([^\d\n]{2,16}?)\s+([\d,]{1,10})\s+[\d.]+\s+([\d,]+)/g;
+  let hm;
+  while((hm=holdingRegex.exec(text))!==null){
+    const code=hm[1],name=hm[2].trim().replace(/\s+/g,'');
+    if(!holdingsMap[code]){
+      holdingsMap[code]={code,name,shares:parseInt(hm[3].replace(/,/g,'')),value:parseInt(hm[4].replace(/,/g,''))};
+    }
+  }
+  const holdings=Object.values(holdingsMap);
+
+  // 市值 fallback：從持股市值加總（>100 才算）
+  if(!marketValue&&holdings.length)marketValue=holdings.reduce((s,h)=>s+(h.value>100?h.value:0),0);
+  // 成本 fallback 1：市值 - 損益
+  if(!cost&&marketValue&&pnl!==0) cost=marketValue-pnl;
+  // 成本 fallback 2：持股加總
+  if(!cost&&holdings.length) cost=holdings.reduce((s,h)=>s+(h.value>100?h.value:0),0);
+  // 損益 fallback：市值 - 成本（成本 > 10000 才可信）
+  if(!pnl&&marketValue>10000&&cost>10000) pnl=marketValue-cost;
+
+  console.log('[YuantaPDF] parsed:', {month, marketValue, cost, pnl, holdings: holdings.length});
+  return{month,marketValue,cost,pnl,holdings,rawTextLength:text.length};
+}
+
+// ── PDF Drop Zone ─────────────────────────────────────────
+const dropZone=document.getElementById('pdf-drop-zone');
+dropZone.addEventListener('dragover',e=>{e.preventDefault();dropZone.classList.add('drag-over')});
+dropZone.addEventListener('dragleave',()=>dropZone.classList.remove('drag-over'));
+dropZone.addEventListener('drop',e=>{e.preventDefault();dropZone.classList.remove('drag-over');handlePdfFiles(e.dataTransfer.files)});
+
+async function handlePdfFiles(fileList){
+  const files=[...fileList].filter(f=>f.name.endsWith('.pdf'));
+  if(!files.length)return;
+
+  const pwd=await askPwd();
+  const progressEl=document.getElementById('pdf-progress');
+  progressEl.style.display='block';
+
+  // Build progress list
+  progressEl.innerHTML=files.map(f=>`<div class="pdf-item" id="pdfitem-${CSS.escape(f.name)}">
+    <div class="status pending">○</div>
+    <span style="color:var(--muted);flex:1">${f.name}</span>
+    <span style="color:var(--muted);font-size:11px" id="pdftxt-${CSS.escape(f.name)}">待處理</span>
+  </div>`).join('');
+
+  const newEntries=[];
+
+  for(const file of files){
+    const id=CSS.escape(file.name);
+    const itemEl=document.getElementById(`pdfitem-${id}`);
+    const statusEl=itemEl?.querySelector('.status');
+    const txtEl=document.getElementById(`pdftxt-${id}`);
+
+    if(statusEl){statusEl.className='status processing';statusEl.textContent=''}
+    if(txtEl)txtEl.textContent='解析中…';
+
+    try{
+      const buf=await file.arrayBuffer();
+      const text=await parsePdf(buf, pwd||undefined);
+      const data=extractYuantaData(text, file.name);
+
+      // DEBUG：顯示 PDF 原始文字前 600 字（確認 regex 目標）
+      if(txtEl) txtEl.title='RAW TEXT:\n'+text.slice(0,600);
+
+      if(statusEl){statusEl.className='status ok';statusEl.textContent='✓'}
+      if(txtEl)txtEl.textContent=`${data.month||'?'} · ${data.holdings.length} 檔持股`;
+
+      newEntries.push({...data, filename:file.name, parsedAt:new Date().toISOString()});
+
+      // Backup to Drive Yuanta_PDF folder
+      try{
+        syncShow();
+        syncSet(file.name,'備份 '+file.name,'active');
+        const subFolderId=await getOrCreateSubfolder('Yuanta_PDF',FOLDER_ID);
+        await driveUploadBinary(file.name,buf,'application/pdf',subFolderId);
+        syncSetState(file.name,'done');
+      }catch(e){syncSetState(file.name,'err')}
+
+    }catch(err){
+      if(statusEl){statusEl.className='status err';statusEl.textContent='✗'}
+      if(txtEl)txtEl.textContent='解析失敗：'+err.message;
+      console.error('PDF parse error',file.name,err);
+    }
+  }
+
+  // Merge into yuantaHistory
+  if(newEntries.length){
+    await mergeYuantaHistory(newEntries);
+  }
+  syncHide();
+  renderYuantaHistory();
+}
+
+// ── Merge & Save yuanta_history.json ──────────────────────
+async function mergeYuantaHistory(newEntries){
+  if(!yuantaHistory){yuantaHistory={months:{}}}
+  for(const e of newEntries){
+    if(e.month)yuantaHistory.months[e.month]=e;
+  }
+  yuantaHistory._updated=new Date().toISOString();
+
+  // Save to Drive
+  try{
+    syncSet('yuanta_save','儲存 yuanta_history.json','active');
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='yuanta_history.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('yuanta_history.json',yuantaHistory,existId);
+    syncSetState('yuanta_save','done');
+  }catch(e){
+    syncSetState('yuanta_save','err');
+    console.error('Save yuanta_history error',e);
+  }
+}
+
+// ── Gmail Auto Sync ───────────────────────────────────────
+async function startGmailSync(){
+  syncItems={};
+  syncShow();
+  syncSet('gmail_scan','掃描 Gmail 對帳單','active');
+
+  try{
+    // Search Gmail for Yuanta emails with attachments
+    const q=encodeURIComponent(`from:${YUANTA_SENDER} subject:${YUANTA_SUBJECT} has:attachment`);
+    const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=50`,
+      {headers:{Authorization:'Bearer '+accessToken}});
+    const data=await res.json();
+    const messages=data.messages||[];
+    syncSetState('gmail_scan','done');
+
+    if(!messages.length){
+      syncSet('gmail_none','未找到元大對帳單郵件','err');
+      syncHide();
+      return;
+    }
+
+    syncSet('gmail_found',`找到 ${messages.length} 封對帳單`,'done');
+
+    // Determine which months already synced
+    const syncedMonths=new Set(Object.keys(yuantaHistory?.months||{}));
+    let newCount=0;
+
+    const pwd=await askPwd();
+
+    for(const msg of messages){
+      // Get message details
+      const detail=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
+        {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+
+      // Extract YYYYMM from subject or body
+      const subject=detail.payload?.headers?.find(h=>h.name==='Subject')?.value||'';
+      const monthMatch=subject.match(/(\d{4})[\/\-]?(\d{2})/)||subject.match(/(\d{6})/);
+      let monthKey='';
+      if(monthMatch){
+        monthKey=monthMatch[1].length===6?monthMatch[1]:`${monthMatch[1]}${monthMatch[2]}`;
+      }
+
+      if(monthKey&&syncedMonths.has(monthKey)){
+        console.log('Skip already synced month:',monthKey);
+        continue;
+      }
+
+      // Find PDF attachment
+      const parts=detail.payload?.parts||[];
+      const pdfPart=findPdfPart(parts);
+      if(!pdfPart){continue}
+
+      syncSet(`dl_${monthKey||msg.id}`,`下載 ${monthKey||msg.id}…`,'active');
+
+      try{
+        const attRes=await fetch(
+          `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}/attachments/${pdfPart.body.attachmentId}`,
+          {headers:{Authorization:'Bearer '+accessToken}});
+        const attData=await attRes.json();
+        // Gmail returns base64url
+        const b64=attData.data.replace(/-/g,'+').replace(/_/g,'/');
+        const binary=atob(b64);
+        const buf=new Uint8Array(binary.length);
+        for(let i=0;i<binary.length;i++)buf[i]=binary.charCodeAt(i);
+        const arrayBuf=buf.buffer;
+
+        const text=await parsePdf(arrayBuf,pwd||undefined);
+        const pdfData=extractYuantaData(text,pdfPart.filename||`${monthKey}.pdf`);
+        if(monthKey&&!pdfData.month)pdfData.month=monthKey;
+
+        syncSetState(`dl_${monthKey||msg.id}`,'done');
+
+        // Backup to Drive
+        try{
+          const subFolderId=await getOrCreateSubfolder('Yuanta_PDF',FOLDER_ID);
+          const fname=pdfPart.filename||`元大證券電子綜合月對帳單_${monthKey}.pdf`;
+          await driveUploadBinary(fname,arrayBuf,'application/pdf',subFolderId);
+        }catch(e){console.warn('Drive backup failed',e)}
+
+        await mergeYuantaHistory([{...pdfData,filename:pdfPart.filename,parsedAt:new Date().toISOString()}]);
+        newCount++;
+        if(pdfData.month)syncedMonths.add(pdfData.month);
+
+      }catch(e){
+        syncSetState(`dl_${monthKey||msg.id}`,'err');
+        console.error('Gmail attachment error',e);
+      }
+    }
+
+    syncSet('sync_done',`同步完成，新增 ${newCount} 份`,'done');
+    renderYuantaHistory();
+
+  }catch(err){
+    syncSet('gmail_err','同步失敗：'+err.message,'err');
+    console.error('Gmail sync error',err);
+  }
+
+  syncHide();
+}
+
+function findPdfPart(parts){
+  for(const p of parts){
+    if(p.mimeType==='application/pdf'||p.filename?.endsWith('.pdf'))return p;
+    if(p.parts){const found=findPdfPart(p.parts);if(found)return found}
+  }
+  return null;
+}
+
+// ── Render Yuanta History ─────────────────────────────────
+function renderYuantaHistory(){
+  const el=document.getElementById('yuanta-history-content');
+  if(!yuantaHistory||!Object.keys(yuantaHistory.months||{}).length){
+    el.innerHTML='<div class="no-portfolio" style="margin-top:16px">尚無對帳單資料 · 點擊上方按鈕同步或匯入 PDF</div>';
+    return;
+  }
+  const months=Object.entries(yuantaHistory.months).sort((a,b)=>b[0].localeCompare(a[0]));
+  el.innerHTML=months.map(([key,d])=>{
+    const yr=key.slice(0,4),mo=key.slice(4,6);
+    const cost=d.cost||0;
+    const pnl=(d.pnl!==0&&d.pnl!=null)?d.pnl:(d.marketValue>10000&&cost>10000)?d.marketValue-cost:0;
+    const pnlColor=pnl>0?'#f87171':pnl<0?'#34d399':'#94a3b8';
+    const holdingsHtml=d.holdings?.length?
+      `<div class="yuanta-holdings">${d.holdings.map(h=>`
+        <div class="yuanta-holding-row">
+          <div><div class="yuanta-holding-name">${h.name}</div><div class="yuanta-holding-code">${h.code}</div></div>
+          <div class="yuanta-holding-pnl" style="color:#7dd3fc">${h.shares?h.shares.toLocaleString()+' 股':'—'}</div>
+        </div>`).join('')}
+      </div>`:'';
+    return`<div class="yuanta-month-card">
+      <div class="yuanta-month-header">
+        <div class="yuanta-month-title">${yr}年${mo}月</div>
+        <div style="font-size:11px;color:var(--muted);font-family:'Space Mono',monospace">${d.holdings?.length||0} 檔持股</div>
+      </div>
+      <div class="yuanta-stats">
+        <div class="yuanta-stat"><div class="yuanta-stat-label">市值</div><div class="yuanta-stat-val" style="color:#7dd3fc;font-size:14px">${d.marketValue?fmtK(d.marketValue):'—'}</div></div>
+        <div class="yuanta-stat"><div class="yuanta-stat-label">成本</div><div class="yuanta-stat-val" style="color:#94a3b8;font-size:14px">${cost?fmtK(cost):'—'}</div></div>
+        <div class="yuanta-stat"><div class="yuanta-stat-label">損益</div><div class="yuanta-stat-val" style="color:${pnlColor};font-size:14px">${pnl?(pnl>0?'+':'')+fmtK(pnl):'—'}</div></div>
+      </div>
+      ${holdingsHtml}
+    </div>`;
+  }).join('');
+}
+
+// ── 共用 AI 呼叫（Gemini）────────────────────────────────────
+async function callAI(prompt){
+  if(!GEMINI_API_KEY) throw new Error('缺少 Gemini API Key，請至「更新憑證」設定');
+  const r=await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${GEMINI_API_KEY}`,{
+    method:'POST',headers:{'Content-Type':'application/json'},
+    body:JSON.stringify({contents:[{parts:[{text:prompt}]}]})
+  });
+  if(!r.ok) throw new Error(`Gemini HTTP ${r.status}`);
+  const d=await r.json();
+  if(d.error) throw new Error(d.error.message||'Gemini API 錯誤');
+  return d.candidates?.[0]?.content?.parts?.[0]?.text||'';
+}
+
+
+async function autoSyncYuantaSilent(){
+  // 1. 掃描 Gmail 取得所有元大對帳單郵件
+  const q=encodeURIComponent(`from:${YUANTA_SENDER} subject:${YUANTA_SUBJECT} has:attachment`);
+  const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=50`,
+    {headers:{Authorization:'Bearer '+accessToken}});
+  const data=await res.json();
+  const messages=data.messages||[];
+  if(!messages.length) return 0;
+
+  // 2. 已同步月份
+  const syncedMonths=new Set(Object.keys(yuantaHistory?.months||{}));
+
+  // 3. 快速掃描每封信的 subject 取月份，找出未同步的
+  const toSync=[];
+  for(const msg of messages){
+    const meta=await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=metadata&metadataHeaders=Subject&metadataHeaders=Date`,
+      {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+    const subject=meta.payload?.headers?.find(h=>h.name==='Subject')?.value||'';
+    // 從 subject 或 Date header 取 YYYYMM
+    let monthKey='';
+    const sm=subject.match(/(\d{4})[\/\-]?(\d{2})/)||subject.match(/(\d{6})/);
+    if(sm) monthKey=sm[1].length===6?sm[1]:`${sm[1]}${sm[2]}`;
+    if(!monthKey){
+      const dateH=meta.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+      if(dateH){const d=new Date(dateH);monthKey=`${d.getFullYear()}${String(d.getMonth()+1).padStart(2,'0')}`;}
+    }
+    if(monthKey&&syncedMonths.has(monthKey)) continue; // 已同步，跳過
+    toSync.push({id:msg.id, monthKey});
+  }
+  if(!toSync.length) return 0;
+
+  // 4. 需要密碼才繼續 — 若 session 已有密碼直接用，否則彈窗詢問
+  const pwd=await askPwd();
+
+  let newCount=0;
+  for(const {id, monthKey} of toSync){
+    try{
+      const detail=await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}?format=full`,
+        {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+
+      const pdfPart=findPdfPart(detail.payload?.parts||[]);
+      if(!pdfPart) continue;
+
+      const attRes=await fetch(
+        `https://gmail.googleapis.com/gmail/v1/users/me/messages/${id}/attachments/${pdfPart.body.attachmentId}`,
+        {headers:{Authorization:'Bearer '+accessToken}});
+      const attData=await attRes.json();
+      const b64=attData.data.replace(/-/g,'+').replace(/_/g,'/');
+      const binary=atob(b64);
+      const buf=new Uint8Array(binary.length);
+      for(let i=0;i<binary.length;i++) buf[i]=binary.charCodeAt(i);
+      const arrayBuf=buf.buffer;
+
+      const text=await parsePdf(arrayBuf, pwd||undefined);
+      const pdfData=extractYuantaData(text, pdfPart.filename||`${monthKey}.pdf`);
+      if(monthKey&&!pdfData.month) pdfData.month=monthKey;
+
+      // 備份 PDF 到 Drive
+      try{
+        const subFolderId=await getOrCreateSubfolder('Yuanta_PDF',FOLDER_ID);
+        await driveUploadBinary(pdfPart.filename||`元大證券電子綜合月對帳單_${monthKey}.pdf`,arrayBuf,'application/pdf',subFolderId);
+      }catch(e){console.warn('Yuanta PDF backup failed',e);}
+
+      await mergeYuantaHistory([{...pdfData,filename:pdfPart.filename,parsedAt:new Date().toISOString()}]);
+      newCount++;
+      if(pdfData.month) syncedMonths.add(pdfData.month);
+    }catch(e){
+      console.warn('autoSyncYuanta item failed:',monthKey,e);
+    }
+  }
+
+  if(newCount>0) renderYuantaHistory();
+  return newCount;
+}
+
+
+function kgiPrompt(bodyText, displayDate){
+  return `從以下國泰證券 AI 投資日報純文字，提取所有持股資訊，輸出 portfolio.json 格式 JSON（只輸出 JSON，不加說明或 markdown）。\n郵件日期：${displayDate}\n---\n${bodyText.slice(0,12000)}\n---\n格式：{"_meta":{"updated":"YYYY-MM-DD","account":"國泰證券"},"market":{"taiex":數字,"taiex_change":數字,"taiex_change_pct":數字,"volume_b":數字,"date":"YYYY-MM-DD"},"holdings":[{"code":"代號","name":"名稱","broker":"國泰證券","price":數字,"change":數字,"change_pct":數字,"volume":數字,"signals":[],"events":[],"report":"摘要"}]}`;
+}
+
+
+function parseKgiHtml(htmlStr, mailDateStr){
+  const doc=new DOMParser().parseFromString(htmlStr,'text/html');
+  const mailDate=mailDateStr?new Date(mailDateStr).toISOString().slice(0,10):'';
+  const allText=doc.body?.textContent||'';
+
+  // ── 大盤數字 ──────────────────────────────────────────
+  let taiex=0,taiexChange=0,taiexPct=0,volumeB=0;
+  const taiexM=allText.match(/加權指數收盤\s*([\d,]+\.?\d*)/);
+  if(taiexM) taiex=parseFloat(taiexM[1].replace(/,/g,''));
+  const chgM=allText.match(/([\d,]+\.?\d*)\(([\d.]+)%\)/);
+  if(chgM){taiexChange=parseFloat(chgM[1].replace(/,/g,''));taiexPct=parseFloat(chgM[2]);}
+  const volM=allText.match(/([\d,]+\.?\d*)億/);
+  if(volM) volumeB=parseFloat(volM[1].replace(/,/g,''));
+
+  // ── 持股：以 kchart 股票走勢圖 img 為起點，每張對應一檔 ──
+  const holdings=[];
+  const seen=new Set();
+  doc.querySelectorAll('img').forEach(img=>{
+    const src=img.getAttribute('src')||'';
+    const m=src.match(/kchart\/\d+\/(\w+)\.png/);
+    if(!m) return;
+    const code=m[1];
+    if(seen.has(code)) return;
+    seen.add(code);
+
+    // 往上找包含此圖的最小有意義 block（包含股票名稱和價格）
+    // 逐層往上找，直到找到含有 22px td 的祖先 table
+    let block=img.closest('table');
+    while(block){
+      const hasPriceAndName=block.querySelector('td[style*="22px"]')&&block.querySelector('td[style*="40px"]');
+      if(hasPriceAndName) break;
+      block=block.parentElement?.closest('table');
+    }
+    if(!block) return;
+
+    // 股票名稱
+    let name='';
+    block.querySelectorAll('td').forEach(td=>{
+      const s=td.getAttribute('style')||'';
+      if(s.includes('22px')){const t=td.textContent.trim();if(t&&t.length>=2&&t.length<=12)name=t;}
+    });
+    if(!name) return;
+
+    // 價格
+    let price=0;
+    block.querySelectorAll('td').forEach(ptd=>{
+      const ps=ptd.getAttribute('style')||'';
+      if(ps.includes('40px')){const v=parseFloat(ptd.textContent.trim().replace(/,/g,''));if(v>0)price=v;}
+    });
+
+    // 漲跌
+    let chg=0,chgP=0;
+    block.querySelectorAll('span').forEach(sp=>{
+      const ss=sp.getAttribute('style')||'';
+      if(ss.includes('16px')&&ss.includes('bold')){
+        const cm=sp.textContent.match(/([\d.]+)\(([\d.]+)%\)/);
+        if(cm){chg=parseFloat(cm[1]);chgP=parseFloat(cm[2]);}
+      }
+    });
+
+    // 成交量
+    let vol=0;
+    block.querySelectorAll('td').forEach(vtd=>{
+      if(vtd.textContent.includes('成交量')){
+        const vm=vtd.textContent.match(/：([\d,]+)/);
+        if(vm) vol=parseInt(vm[1].replace(/,/g,''));
+      }
+    });
+
+    // signals
+    const signals=[];
+    block.querySelectorAll('td').forEach(std=>{
+      if(std.textContent.includes('◉')){
+        std.textContent.split(/[\n◉]/).forEach(s=>{
+          const t=s.trim();if(t&&t.length>1&&t.length<40)signals.push(t);
+        });
+      }
+    });
+
+    // report
+    let report='';
+    block.querySelectorAll('td').forEach(rtd=>{
+      const rs=rtd.getAttribute('style')||'';
+      if(rs.includes('#1C89C4')){const t=rtd.textContent.trim();if(t.length>10)report=t.slice(0,150);}
+    });
+
+    holdings.push({code,name,broker:'國泰證券',price,change:chg,change_pct:chgP,volume:vol,signals,events:[],report});
+  });
+  return{_meta:{updated:mailDate,account:'國泰證券'},market:{taiex,taiex_change:taiexChange,taiex_change_pct:taiexPct,volume_b:volumeB,date:mailDate},holdings};
+}
+
+
+async function autoSyncKgiSilent(){
+  const pfUpdated=portfolio?._meta?.updated||'';
+  let rangeQ='newer_than:14d';
+  if(pfUpdated){
+    const d=new Date(pfUpdated);d.setDate(d.getDate()+1);
+    rangeQ=`after:${d.getFullYear()}/${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
+  }
+  const q=encodeURIComponent(`subject:【AI投資日報】 ${rangeQ}`);
+  const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
+    {headers:{Authorization:'Bearer '+accessToken}});
+  const data=await res.json();
+  const messages=data.messages||[];
+  if(!messages.length) return;
+
+  const detail=await fetch(
+    `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
+    {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+
+  const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+  const mailDate=dateHeader?new Date(dateHeader).toISOString().slice(0,10):'';
+  if(mailDate&&portfolio?._meta?.updated===mailDate) return;
+
+  function getHtmlBodyA(payload){
+    if(!payload)return'';
+    if(payload.mimeType==='text/html'&&payload.body?.data){
+      const b64=payload.body.data.replace(/-/g,'+').replace(/_/g,'/');
+      const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+      const charset=(payload.headers?.find(h=>h.name?.toLowerCase()==='content-type')?.value||'').match(/charset=([^\s;]+)/i)?.[1]||'utf-8';
+      try{return new TextDecoder(charset).decode(bytes);}catch{return new TextDecoder('utf-8').decode(bytes);}
+    }
+    if(payload.parts){for(const p of payload.parts){const b=getHtmlBodyA(p);if(b)return b;}}
+    return'';
+  }
+  const htmlStr=getHtmlBodyA(detail.payload);
+  if(!htmlStr) return;
+
+  // 優先用 DOM 解析（不需 API key）
+  const parsed=parseKgiHtml(htmlStr, dateHeader);
+  if(!parsed.market.taiex||!parsed.holdings.length){
+    // DOM 解析失敗才 fallback Gemini
+    if(!GEMINI_API_KEY){console.warn('autoSyncKgi: DOM parse failed, no Gemini key');return;}
+    function htmlToTextA(html){
+      const doc=new DOMParser().parseFromString(html,'text/html');
+      doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+      doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
+      return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+    }
+    const body=htmlToTextA(htmlStr);
+    const displayDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+    let raw='';
+    try{raw=await callAI(kgiPrompt(body,displayDate));}catch(e){console.warn('autoSyncKgi Gemini failed:',e);return;}
+    try{Object.assign(parsed,JSON.parse(raw.replace(/```json|```/g,'').trim()));}
+    catch(e){console.warn('autoSyncKgi parse fail:',raw.slice(0,200));return;}
+  }
+
+  const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+  const existId=list.files?.[0]?.id;
+  await driveUploadJson('portfolio.json',parsed,existId);
+  portfolio=parsed;renderPortfolio();renderDashboard();
+}
+
+
+async function syncKgiPortfolio(){
+  syncItems={};syncShow();
+  syncSet('kgi_scan','掃描國泰 AI 投資日報','active');
+  try{
+    // 手動按鈕：不限日期，永遠抓最新一封
+    const q=encodeURIComponent('subject:【AI投資日報】');
+    const res=await fetch(`https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${q}&maxResults=1`,
+      {headers:{Authorization:'Bearer '+accessToken}});
+    const data=await res.json();
+    const messages=data.messages||[];
+    if(!messages.length){
+      syncSetState('kgi_scan','err');
+      syncSet('kgi_none','找不到國泰 AI 投資日報','err');
+      syncHide();return;
+    }
+    syncSetState('kgi_scan','done');
+    const detail=await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${messages[0].id}?format=full`,
+      {headers:{Authorization:'Bearer '+accessToken}}).then(r=>r.json());
+    syncSet('kgi_parse','解析日報內容','active');
+    function getHtmlBodyM(payload){
+      if(!payload)return'';
+      if(payload.mimeType==='text/html'&&payload.body?.data){
+        const b64=payload.body.data.replace(/-/g,'+').replace(/_/g,'/');
+        const bytes=Uint8Array.from(atob(b64),c=>c.charCodeAt(0));
+        // 偵測 charset，優先用 big5 解碼
+        const charset=(payload.headers?.find(h=>h.name?.toLowerCase()==='content-type')?.value||'').match(/charset=([^\s;]+)/i)?.[1]||'utf-8';
+        try{return new TextDecoder(charset).decode(bytes);}catch{return new TextDecoder('utf-8').decode(bytes);}
+      }
+      if(payload.parts){for(const p of payload.parts){const b=getHtmlBodyM(p);if(b)return b;}}
+      return'';
+    }
+    function htmlToTextM(html){
+      const doc=new DOMParser().parseFromString(html,'text/html');
+      doc.querySelectorAll('script,style,img').forEach(el=>el.remove());
+      doc.querySelectorAll('br,p,tr,div').forEach(el=>el.after(doc.createTextNode('\n')));
+      return(doc.body?.textContent||'').replace(/\s{3,}/g,'\n').replace(/\n{3,}/g,'\n\n').trim();
+    }
+    const dateHeader=detail.payload?.headers?.find(h=>h.name==='Date')?.value||'';
+    const rawHtml=getHtmlBodyM(detail.payload);
+    if(!rawHtml){syncSetState('kgi_parse','err');syncSet('kgi_err2','找不到郵件內容','err');syncHide();return;}
+
+    // 優先 DOM 解析（不需 API key）
+    let newPortfolio=parseKgiHtml(rawHtml, dateHeader);
+    if(!newPortfolio.market.taiex||!newPortfolio.holdings.length){
+      // fallback Gemini
+      syncSet('kgi_claude','Gemini 解析（DOM 解析失敗）','active');
+      if(!GEMINI_API_KEY){syncSetState('kgi_parse','err');syncSet('kgi_json_err','DOM 解析失敗且無 Gemini Key','err');syncHide();return;}
+      const body=htmlToTextM(rawHtml);
+      const mailDate=dateHeader?new Date(dateHeader).toLocaleDateString('zh-TW'):'';
+      let raw='';
+      try{raw=await callAI(kgiPrompt(body,mailDate));}
+      catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','AI 呼叫失敗：'+e.message,'err');syncHide();return;}
+      try{newPortfolio=JSON.parse(raw.replace(/```json|```/g,'').trim());}
+      catch(e){syncSetState('kgi_claude','err');syncSet('kgi_json_err','解析失敗：'+(raw.slice(0,100)||'(空回應)'),'err');syncHide();return;}
+      syncSetState('kgi_claude','done');
+    } else {
+      syncSetState('kgi_parse','done');
+    }
+    syncSet('kgi_upload','上傳 portfolio.json','active');
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('portfolio.json',newPortfolio,existId);
+    syncSetState('kgi_upload','done');
+    portfolio=newPortfolio;renderPortfolio();renderDashboard();
+    syncSet('kgi_done',`同步完成 ✓ (${newPortfolio._meta?.updated}，${newPortfolio.holdings.length}檔)`,'done');
+  }catch(err){syncSet('kgi_err','同步失敗：'+err.message,'err');console.error('KGI sync error',err);}
+  syncHide();
+}
+</script>
+<!-- ── Paste JSON Modal ─────────────────────────────────── -->
+<div id="paste-json-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.7);z-index:9999;align-items:center;justify-content:center;padding:20px;box-sizing:border-box">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:24px;width:92vw;max-width:480px;font-family:'Noto Sans TC',sans-serif">
+    <div style="font-weight:700;color:#94a3b8;font-family:'Space Mono',monospace;margin-bottom:8px">📋 貼入 portfolio.json</div>
+    <div style="color:#475569;font-size:11px;margin-bottom:12px">將 Claude 產出的 portfolio.json 內容貼入後儲存，自動上傳至 Drive。</div>
+    <textarea id="paste-json-input" rows="10" style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:11px;font-family:'Space Mono',monospace;resize:vertical;margin-bottom:10px" placeholder='{"_meta":...}'></textarea>
+    <div id="paste-json-msg" style="min-height:16px;font-size:12px;color:#f87171;margin-bottom:10px"></div>
+    <div style="display:flex;gap:10px">
+      <button onclick="doPasteJson()" style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;font-weight:700;cursor:pointer;font-family:'Noto Sans TC',sans-serif">儲存並上傳</button>
+      <button onclick="document.getElementById('paste-json-modal').style.display='none'" style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">取消</button>
+    </div>
+  </div>
+</div>
+<script>
+async function cleanYuantaHistory(){
+  if(!yuantaHistory?.months) return;
+  const before=Object.keys(yuantaHistory.months).length;
+  // 刪除 marketValue < 10000 的錯誤月份
+  for(const [k,v] of Object.entries(yuantaHistory.months)){
+    if(!v.marketValue || v.marketValue < 10000) delete yuantaHistory.months[k];
+  }
+  const after=Object.keys(yuantaHistory.months).length;
+  const removed=before-after;
+  if(removed===0){alert('沒有需要清除的錯誤資料');return;}
+  if(!confirm(`將清除 ${removed} 筆錯誤資料（市值<10000），確認？`)) return;
+  yuantaHistory._updated=new Date().toISOString();
+  syncShow();syncSet('clean','清除並儲存…','active');
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='yuanta_history.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('yuanta_history.json',yuantaHistory,existId);
+    syncSetState('clean','done');
+    syncSet('clean_done',`已清除 ${removed} 筆，剩 ${after} 筆`,'done');
+  }catch(e){syncSetState('clean','err');}
+  syncHide();
+  renderYuantaHistory();
+}
+
+async function setFixedCost(){
+  if(!yuantaHistory?.months||!Object.keys(yuantaHistory.months).length){alert('尚無對帳單資料');return;}
+  const months=Object.keys(yuantaHistory.months).sort().reverse();
+  const monthStr=months.map(k=>`${k.slice(0,4)}/${k.slice(4,6)}`).join('\n');
+  const sel=prompt(`選擇要設定成本的月份（輸入如 202605）：\n可用月份：\n${monthStr}`,'202605');
+  if(!sel) return;
+  const key=sel.replace('/','');
+  if(!yuantaHistory.months[key]){alert('找不到此月份：'+key);return;}
+  const cur=yuantaHistory.months[key].cost||0;
+  const v=prompt(`設定 ${key.slice(0,4)}年${key.slice(4,6)}月 成本（目前：${cur?'NT$'+cur.toLocaleString():'未設定'}）：`,'315000');
+  if(!v) return;
+  const n=parseInt(v.replace(/,/g,''));
+  if(isNaN(n)||n<=0){alert('請輸入有效數字');return;}
+  yuantaHistory.months[key].cost=n;
+  yuantaHistory._updated=new Date().toISOString();
+  syncShow();syncSet('setcost','儲存成本設定…','active');
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='yuanta_history.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('yuanta_history.json',yuantaHistory,existId);
+    syncSetState('setcost','done');
+    syncSet('setcost_ok',`${key.slice(0,4)}/${key.slice(4,6)} 成本已設為 NT$${n.toLocaleString()}`,'done');
+  }catch(e){syncSetState('setcost','err');}
+  syncHide();
+  // 移除 localStorage 全局覆蓋（改用精確月份資料）
+  localStorage.removeItem('yuanta_fixed_cost');
+  renderYuantaHistory();
+}
+async function resetPortfolio(){
+  if(!confirm('刪除 Drive 上的 portfolio.json 並重新從 Gmail 同步？')) return;
+  syncShow();syncSet('reset','刪除舊 portfolio.json…','active');
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const id=list.files?.[0]?.id;
+    if(id){
+      await fetch(`https://www.googleapis.com/drive/v3/files/${id}`,
+        {method:'DELETE',headers:{Authorization:'Bearer '+accessToken}});
+    }
+    syncSetState('reset','done');
+    portfolio=null;
+    syncSet('reset_sync','重新同步國泰日報…','active');
+    await syncKgiPortfolio();
+  }catch(e){syncSetState('reset','err');syncSet('reset_err','失敗：'+e.message,'err');}
+  syncHide();
+}
+
+function showPasteJsonModal(){
+  document.getElementById('paste-json-input').value='';
+  document.getElementById('paste-json-msg').textContent='';
+  document.getElementById('paste-json-modal').style.display='flex';
+}
+async function doPasteJson(){
+  const raw=document.getElementById('paste-json-input').value.trim();
+  const msg=document.getElementById('paste-json-msg');
+  if(!raw){msg.textContent='請貼入 JSON';return;}
+  let parsed;
+  try{parsed=JSON.parse(raw);}
+  catch(e){msg.textContent='JSON 格式錯誤：'+e.message;return;}
+  msg.style.color='#94a3b8';msg.textContent='上傳中…';
+  try{
+    const list=await driveGet(`https://www.googleapis.com/drive/v3/files?q='${FOLDER_ID}'+in+parents+and+name='portfolio.json'+and+trashed=false&fields=files(id)`);
+    const existId=list.files?.[0]?.id;
+    await driveUploadJson('portfolio.json',parsed,existId);
+    portfolio=parsed;renderPortfolio();renderDashboard();
+    msg.style.color='#34d399';msg.textContent='✓ 上傳成功！';
+    setTimeout(()=>document.getElementById('paste-json-modal').style.display='none',1200);
+  }catch(e){msg.style.color='#f87171';msg.textContent='上傳失敗：'+e.message;}
+}
+</script>
+
+<!-- ── Credentials Update Modal ─────────────────────────── -->
+<div id="cred-modal" style="display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.85);z-index:10001;align-items:center;justify-content:center;padding:20px;box-sizing:border-box">
+  <div style="background:#0f172a;border:1px solid #1e3a5f;border-radius:14px;padding:28px 24px;width:340px;max-width:92vw;font-family:'Noto Sans TC',sans-serif">
+    <div style="font-weight:700;color:#94a3b8;letter-spacing:.05em;margin-bottom:4px;font-family:'Space Mono',monospace">⚙️ 更新憑證</div>
+    <div style="color:#475569;font-size:11px;margin-bottom:18px">留空的欄位不會被修改</div>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Google OAuth Client ID</label>
+    <input id="upd-cid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Drive 資料夾 ID</label>
+    <input id="upd-fid" type="text" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:10px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">Gemini API Key</label>
+    <input id="upd-gkey" type="password" autocomplete="off" placeholder="（留空=不變）"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"/>
+
+    <label style="display:block;color:#64748b;font-size:11px;margin-bottom:3px">登入密碼 <span style="color:#f87171">*</span></label>
+    <input id="upd-pwd" type="password" autocomplete="current-password" placeholder="必填，用於重新加密"
+      style="width:100%;box-sizing:border-box;background:#020817;border:1px solid #334155;color:#e2e8f0;padding:8px 10px;border-radius:7px;font-size:12px;font-family:'Space Mono',monospace;margin-bottom:14px"
+      onkeydown="if(event.key==='Enter')doUpdateCreds()"/>
+
+    <div id="cred-msg" style="min-height:18px;font-size:12px;color:#f87171;margin-bottom:12px;text-align:center"></div>
+
+    <div style="display:flex;gap:10px">
+      <button onclick="doUpdateCreds()"
+        style="flex:1;background:#1e3a5f;color:#7dd3fc;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif;font-weight:700">
+        儲存
+      </button>
+      <button onclick="document.getElementById('cred-modal').style.display='none'"
+        style="flex:1;background:#1e293b;color:#64748b;border:none;border-radius:8px;padding:10px;font-size:13px;cursor:pointer;font-family:'Noto Sans TC',sans-serif">
+        取消
+      </button>
+    </div>
+  </div>
+</div>
+
+<script>
+function showCredModal(){
+  document.getElementById('upd-cid').value='';
+  document.getElementById('upd-fid').value='';
+  document.getElementById('upd-gkey').value='';
+  document.getElementById('upd-pwd').value='';
+  document.getElementById('cred-msg').textContent='';
+  document.getElementById('cred-modal').style.display='flex';
+  setTimeout(()=>document.getElementById('upd-gkey').focus(),50);
+}
+
+// 綁定所有按鈕（避免時序問題）
+async function doUpdateCreds(){
+  const pwd =document.getElementById('upd-pwd').value;
+  const cid =document.getElementById('upd-cid').value.trim();
+  const fid =document.getElementById('upd-fid').value.trim();
+  const gkey=document.getElementById('upd-gkey').value.trim();
+  const msg =document.getElementById('cred-msg');
+
+  if(!pwd){msg.textContent='請輸入登入密碼';return;}
+  if(!cid&&!fid&&!gkey){msg.textContent='至少填寫一個要更新的欄位';return;}
+  if(typeof window.fbUpdateCredentials!=='function'){
+    msg.style.color='#f87171';
+    msg.textContent='Firebase 尚未就緒，請稍後再試';return;
+  }
+
+  msg.style.color='#94a3b8';
+  msg.textContent='更新中…';
+
+  const r=await window.fbUpdateCredentials(pwd,cid,fid,gkey);
+  if(r.ok){
+    msg.style.color='#34d399';
+    msg.textContent='✓ 儲存成功！';
+    if(cid){CLIENT_ID=cid;}
+    if(fid){FOLDER_ID=fid;}
+    if(gkey){GEMINI_API_KEY=gkey;}
+    setTimeout(()=>{document.getElementById('cred-modal').style.display='none';},1800);
+  }else{
+    msg.style.color='#f87171';
+    msg.textContent='✗ '+r.msg;
+  }
+}
+</script>
+</body>
